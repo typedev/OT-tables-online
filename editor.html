@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OT Binary Patcher — edit & rebuild</title>
+<style>
+:root {
+  --bg: #1a1a1e;
+  --bg-surface: #232328;
+  --bg-row: #28282e;
+  --bg-row-alt: #2e2e35;
+  --bg-edited: #1a2a3a;
+  --border: #3a3a42;
+  --border-accent: #5a5a65;
+  --text: #d4d4d8;
+  --text-dim: #8a8a95;
+  --text-label: #a0a0ab;
+  --accent: #e8a44a;
+  --accent-dim: #b07830;
+  --red: #d45050;
+  --green: #50b070;
+  --blue: #4a90d9;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --font-ui: 'Inter', system-ui, -apple-system, sans-serif;
+}
+</style>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+header {
+  padding: 24px 32px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+}
+header h1 {
+  font-family: var(--font-mono); font-size: 18px; font-weight: 700;
+  color: var(--accent); letter-spacing: -0.02em;
+}
+header .subtitle { color: var(--text-dim); font-size: 12px; }
+</style>
+<style>
+.controls {
+  padding: 12px 32px; display: flex; gap: 10px; align-items: center;
+  border-bottom: 1px solid var(--border); flex-wrap: wrap;
+}
+.btn {
+  font-family: var(--font-mono); font-size: 11px; padding: 6px 14px;
+  border: 1px solid var(--border-accent); background: var(--bg-surface);
+  color: var(--text); cursor: pointer; border-radius: 4px; transition: all 0.15s;
+}
+.btn:hover { background: var(--bg-row); border-color: var(--accent-dim); }
+.btn.danger { border-color: var(--red); color: var(--red); }
+.btn.danger:hover { background: rgba(212,80,80,0.1); }
+.btn.export { border-color: var(--green); color: var(--green); }
+.btn.export:hover { background: rgba(80,176,112,0.1); }
+.btn.export:disabled { opacity: 0.35; cursor: default; }
+.spacer { flex: 1; }
+.font-info {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+  padding: 2px 8px; background: var(--bg-row); border-radius: 3px;
+}
+.changes-count {
+  font-family: var(--font-mono); font-size: 11px; color: var(--blue);
+  padding: 2px 8px; background: rgba(74,144,217,0.1); border-radius: 3px;
+}
+</style>
+<style>
+#dropzone {
+  margin: 20px 32px; padding: 40px; border: 2px dashed var(--border-accent);
+  border-radius: 8px; text-align: center; color: var(--text-dim);
+  font-size: 13px; transition: all 0.2s; cursor: pointer;
+}
+#dropzone.drag-over {
+  border-color: var(--accent); background: rgba(232,164,74,0.06); color: var(--accent);
+}
+#dropzone .icon { font-size: 28px; margin-bottom: 8px; opacity: 0.5; }
+#dropzone input { display: none; }
+
+.tables-wrap { padding: 0 32px 60px; overflow-x: auto; }
+
+.section-header {
+  font-family: var(--font-mono); font-size: 14px; font-weight: 700;
+  color: var(--accent); margin: 28px 0 8px; padding: 8px 0;
+  border-bottom: 1px solid var(--border); cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 8px;
+}
+.section-header .arrow { font-size: 10px; transition: transform 0.2s; }
+.section-header.collapsed .arrow { transform: rotate(-90deg); }
+</style>
+<style>
+table.fields {
+  width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed;
+}
+table.fields th, table.fields td {
+  padding: 5px 10px; border: 1px solid var(--border); vertical-align: top; word-break: break-word;
+}
+table.fields thead th {
+  background: var(--bg-surface); font-family: var(--font-mono); font-weight: 600;
+  font-size: 11px; color: var(--text-label); position: sticky; top: 0; z-index: 2; text-align: left;
+}
+table.fields th.param-col { width: 220px; min-width: 160px; }
+table.fields tbody tr:nth-child(odd) { background: var(--bg-row); }
+table.fields tbody tr:nth-child(even) { background: var(--bg-row-alt); }
+table.fields tbody td.param-name {
+  font-family: var(--font-mono); font-weight: 500; font-size: 11px;
+  color: var(--text-label); white-space: nowrap;
+}
+table.fields tbody td.val {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text);
+  cursor: text; position: relative;
+}
+table.fields tbody td.val:hover {
+  outline: 1px dashed var(--border-accent); outline-offset: -1px;
+}
+table.fields tbody td.val.readonly {
+  color: var(--text-dim); cursor: default;
+}
+table.fields tbody td.val.readonly:hover { outline: none; }
+table.fields tbody td.val.editing { padding: 0; outline: 2px solid var(--blue); outline-offset: -2px; }
+table.fields tbody td.val.edited { background: var(--bg-edited) !important; }
+table.fields tbody td.val.edited::after {
+  content: '\25cf'; position: absolute; top: 2px; right: 4px; color: var(--blue); font-size: 8px;
+}
+table.fields tbody td.val.marked-delete { background: rgba(212,80,80,0.12) !important; }
+table.fields tbody td.val.marked-delete::after { content: none; }
+table.fields tbody td.val textarea.cell-edit {
+  width: 100%; height: 100%; min-height: 24px; background: var(--bg-surface);
+  color: var(--text); border: none; outline: none; font-family: var(--font-mono);
+  font-size: 11px; padding: 5px 10px; resize: vertical;
+}
+.empty-state {
+  text-align: center; padding: 60px 20px; color: var(--text-dim); font-size: 14px;
+}
+.badge {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
+  background: var(--bg-surface); padding: 1px 5px; border-radius: 3px; margin-left: 6px;
+}
+</style>
+<style>
+table.dir-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+}
+table.dir-table th, table.dir-table td {
+  padding: 5px 10px; border: 1px solid var(--border); vertical-align: middle;
+}
+table.dir-table thead th {
+  background: var(--bg-surface); font-family: var(--font-mono); font-weight: 600;
+  font-size: 11px; color: var(--text-label); text-align: left;
+}
+table.dir-table tbody tr:nth-child(odd) { background: var(--bg-row); }
+table.dir-table tbody tr:nth-child(even) { background: var(--bg-row-alt); }
+table.dir-table tbody tr.row-deleted td {
+  text-decoration: line-through; color: var(--text-dim);
+}
+table.dir-table td.tag-cell {
+  font-family: var(--font-mono); font-weight: 700; font-size: 12px; width: 80px;
+}
+table.dir-table td.size-cell {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); width: 100px;
+}
+table.dir-table td.del-cell { width: 40px; text-align: center; }
+table.dir-table td.del-cell input { accent-color: var(--red); cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OT Binary Patcher</h1>
+  <span class="subtitle">head · name · OS/2 — binary-level edit & rebuild</span>
+</header>
+
+<div class="controls">
+  <button class="btn" onclick="document.getElementById('fileInput').click()">Load Font</button>
+  <button class="btn danger" onclick="clearFont()">Clear</button>
+  <span class="font-info" id="fontInfo">No font loaded</span>
+  <span class="changes-count" id="changesCount" style="display:none">0 edits</span>
+  <div class="spacer"></div>
+  <button class="btn export" id="downloadBtn" disabled onclick="downloadFont()">Download Modified Font</button>
+</div>
+
+<div id="dropzone" onclick="document.getElementById('fileInput').click()">
+  <div class="icon">&#x2B07;</div>
+  <div>Drop an OTF / TTF file here or click to browse</div>
+  <div style="font-size:11px; margin-top:4px; color:var(--text-dim)">Binary-level editor &mdash; double-click values to edit &middot; check tables to delete</div>
+  <input type="file" id="fileInput" accept=".otf,.ttf" onchange="handleFile(this.files)">
+</div>
+
+<div class="tables-wrap" id="tablesWrap"></div>
+
+<script>
+// ══════════════════════════════════════════════════════════
+// Constants
+// ══════════════════════════════════════════════════════════
+
+const NAME_IDS = {
+  0:'Copyright', 1:'Font Family', 2:'Font Subfamily', 3:'Unique ID',
+  4:'Full Name', 5:'Version String', 6:'PostScript Name', 7:'Trademark',
+  8:'Manufacturer', 9:'Designer', 10:'Description', 11:'Vendor URL',
+  12:'Designer URL', 13:'License', 14:'License URL',
+  16:'Typographic Family', 17:'Typographic Subfamily',
+  18:'Compatible Full (Mac)', 19:'Sample Text',
+  20:'PostScript CID findfont', 21:'WWS Family', 22:'WWS Subfamily',
+  23:'Light Background Palette', 24:'Dark Background Palette',
+  25:'Variations PostScript Prefix',
+};
+
+const WEIGHT_NAMES = {100:'Thin',200:'ExtraLight',250:'ExtraLight',300:'Light',350:'SemiLight',400:'Regular',500:'Medium',600:'SemiBold',700:'Bold',800:'ExtraBold',900:'Black',950:'ExtraBlack'};
+const WIDTH_NAMES = {1:'Ultra-condensed',2:'Extra-condensed',3:'Condensed',4:'Semi-condensed',5:'Normal',6:'Semi-expanded',7:'Expanded',8:'Extra-expanded',9:'Ultra-expanded'};
+const FSTYPE_BITS = {1:'Restricted License',2:'Preview & Print',3:'Editable',8:'No Subsetting',9:'Bitmap Only'};
+const FSSELECTION_BITS = {0:'ITALIC',1:'UNDERSCORE',2:'NEGATIVE',3:'OUTLINED',4:'STRIKEOUT',5:'BOLD',6:'REGULAR',7:'USE_TYPO_METRICS',8:'WWS',9:'OBLIQUE'};
+const HEAD_FLAGS_BITS = {0:'Y0_IS_BASELINE',1:'X_LSB_IS_AT_0',2:'SCALED_POINT_SIZE_DIFFERS',3:'USE_INTEGER_SCALING',4:'INSTRUCTIONS_ALTER_ADVANCE',5:'VERTICAL_LAYOUT',11:'LOSSLESS_COMPRESSION',12:'CONVERTED_FONT',13:'CLEARTYPE_OPTIMIZED',14:'LAST_RESORT_FONT'};
+const MACSTYLE_BITS = {0:'Bold',1:'Italic',2:'Underline',3:'Outline',4:'Shadow',5:'Condensed',6:'Extended'};
+
+const HEAD_LAYOUT = [
+  {name:'majorVersion',    offset:0,  type:'uint16',       readonly:true},
+  {name:'minorVersion',    offset:2,  type:'uint16',       readonly:true},
+  {name:'fontRevision',    offset:4,  type:'fixed16.16'},
+  {name:'checksumAdjustment', offset:8, type:'uint32',     readonly:true},
+  {name:'magicNumber',     offset:12, type:'uint32',       readonly:true},
+  {name:'flags',           offset:16, type:'uint16'},
+  {name:'unitsPerEm',      offset:18, type:'uint16'},
+  {name:'created',         offset:20, type:'longdatetime'},
+  {name:'modified',        offset:28, type:'longdatetime'},
+  {name:'xMin',            offset:36, type:'int16'},
+  {name:'yMin',            offset:38, type:'int16'},
+  {name:'xMax',            offset:40, type:'int16'},
+  {name:'yMax',            offset:42, type:'int16'},
+  {name:'macStyle',        offset:44, type:'uint16'},
+  {name:'lowestRecPPEM',   offset:46, type:'uint16'},
+  {name:'fontDirectionHint', offset:48, type:'int16'},
+  {name:'indexToLocFormat', offset:50, type:'int16'},
+  {name:'glyphDataFormat', offset:52, type:'int16'},
+];
+
+const OS2_LAYOUT_BASE = [
+  {name:'version',             offset:0,  type:'uint16', readonly:true},
+  {name:'xAvgCharWidth',       offset:2,  type:'int16'},
+  {name:'usWeightClass',       offset:4,  type:'uint16'},
+  {name:'usWidthClass',        offset:6,  type:'uint16'},
+  {name:'fsType',              offset:8,  type:'uint16'},
+  {name:'ySubscriptXSize',     offset:10, type:'int16'},
+  {name:'ySubscriptYSize',     offset:12, type:'int16'},
+  {name:'ySubscriptXOffset',   offset:14, type:'int16'},
+  {name:'ySubscriptYOffset',   offset:16, type:'int16'},
+  {name:'ySuperscriptXSize',   offset:18, type:'int16'},
+  {name:'ySuperscriptYSize',   offset:20, type:'int16'},
+  {name:'ySuperscriptXOffset', offset:22, type:'int16'},
+  {name:'ySuperscriptYOffset', offset:24, type:'int16'},
+  {name:'yStrikeoutSize',      offset:26, type:'int16'},
+  {name:'yStrikeoutPosition',  offset:28, type:'int16'},
+  {name:'sFamilyClass',        offset:30, type:'int16'},
+  {name:'panose',              offset:32, type:'bytes', length:10},
+  {name:'ulUnicodeRange1',     offset:42, type:'uint32'},
+  {name:'ulUnicodeRange2',     offset:46, type:'uint32'},
+  {name:'ulUnicodeRange3',     offset:50, type:'uint32'},
+  {name:'ulUnicodeRange4',     offset:54, type:'uint32'},
+  {name:'achVendID',           offset:58, type:'tag'},
+  {name:'fsSelection',         offset:62, type:'uint16'},
+  {name:'usFirstCharIndex',    offset:64, type:'uint16'},
+  {name:'usLastCharIndex',     offset:66, type:'uint16'},
+  {name:'sTypoAscender',       offset:68, type:'int16'},
+  {name:'sTypoDescender',      offset:70, type:'int16'},
+  {name:'sTypoLineGap',        offset:72, type:'int16'},
+  {name:'usWinAscent',         offset:74, type:'uint16'},
+  {name:'usWinDescent',        offset:76, type:'uint16'},
+];
+const OS2_LAYOUT_V1 = [
+  {name:'ulCodePageRange1', offset:78, type:'uint32'},
+  {name:'ulCodePageRange2', offset:82, type:'uint32'},
+];
+const OS2_LAYOUT_V2 = [
+  {name:'sxHeight',       offset:86, type:'int16'},
+  {name:'sCapHeight',     offset:88, type:'int16'},
+  {name:'usDefaultChar',  offset:90, type:'uint16'},
+  {name:'usBreakChar',    offset:92, type:'uint16'},
+  {name:'usMaxContext',   offset:94, type:'uint16'},
+];
+const OS2_LAYOUT_V5 = [
+  {name:'usLowerOpticalPointSize', offset:96, type:'uint16'},
+  {name:'usUpperOpticalPointSize', offset:98, type:'uint16'},
+];
+
+function getOS2Layout(version) {
+  const l = [...OS2_LAYOUT_BASE];
+  if (version >= 1) l.push(...OS2_LAYOUT_V1);
+  if (version >= 2) l.push(...OS2_LAYOUT_V2);
+  if (version >= 5) l.push(...OS2_LAYOUT_V5);
+  return l;
+}
+
+// ══════════════════════════════════════════════════════════
+// State
+// ══════════════════════════════════════════════════════════
+
+let fontBuffer = null;
+let fontFileName = '';
+let sfVersion = 0;
+let tableRecords = [];
+let tableData = new Map();
+let deletedTables = new Set();
+let headParsed = null;
+let os2Parsed = null;
+let os2Version = 0;
+let nameRecords = [];
+let nameFormat = 0;
+let headEdits = new Map();
+let os2Edits = new Map();
+let nameEdits = new Map(); // nameID -> string | null (null = delete)
+
+// ══════════════════════════════════════════════════════════
+// Binary utilities
+// ══════════════════════════════════════════════════════════
+
+function readTag(dv, offset) {
+  return String.fromCharCode(dv.getUint8(offset), dv.getUint8(offset+1),
+    dv.getUint8(offset+2), dv.getUint8(offset+3));
+}
+
+function writeTag(dv, offset, tag) {
+  for (let i = 0; i < 4; i++) dv.setUint8(offset + i, (tag.charCodeAt(i) || 0x20));
+}
+
+const MAC_EPOCH_OFFSET = 2082844800n;
+
+function readLONGDATETIME(dv, offset) {
+  const hi = dv.getInt32(offset);
+  const lo = dv.getUint32(offset + 4);
+  const macSec = (BigInt(hi) << 32n) | BigInt(lo >>> 0);
+  return new Date(Number((macSec - MAC_EPOCH_OFFSET) * 1000n));
+}
+
+function writeLONGDATETIME(dv, offset, date) {
+  const macSec = BigInt(Math.floor(date.getTime() / 1000)) + MAC_EPOCH_OFFSET;
+  dv.setInt32(offset, Number(macSec >> 32n));
+  dv.setUint32(offset + 4, Number(macSec & 0xFFFFFFFFn));
+}
+
+function readField(dv, base, f) {
+  const o = base + f.offset;
+  switch (f.type) {
+    case 'uint16': return dv.getUint16(o);
+    case 'int16':  return dv.getInt16(o);
+    case 'uint32': return dv.getUint32(o);
+    case 'int32':  return dv.getInt32(o);
+    case 'fixed16.16': return dv.getInt32(o) / 65536.0;
+    case 'longdatetime': return readLONGDATETIME(dv, o);
+    case 'tag': return readTag(dv, o);
+    case 'bytes': {
+      const a = [];
+      for (let i = 0; i < f.length; i++) a.push(dv.getUint8(o + i));
+      return a;
+    }
+  }
+}
+
+function writeField(dv, base, f, val) {
+  const o = base + f.offset;
+  switch (f.type) {
+    case 'uint16': dv.setUint16(o, val); break;
+    case 'int16':  dv.setInt16(o, val); break;
+    case 'uint32': dv.setUint32(o, val); break;
+    case 'int32':  dv.setInt32(o, val); break;
+    case 'fixed16.16': dv.setInt32(o, Math.round(val * 65536)); break;
+    case 'longdatetime': writeLONGDATETIME(dv, o, val); break;
+    case 'tag': writeTag(dv, o, val); break;
+    case 'bytes':
+      for (let i = 0; i < f.length; i++) dv.setUint8(o + i, val[i] || 0);
+      break;
+  }
+}
+
+function calcTableChecksum(bytes) {
+  const len = bytes.length;
+  const padded = (len + 3) & ~3;
+  const buf = new ArrayBuffer(padded);
+  new Uint8Array(buf).set(bytes);
+  const dv = new DataView(buf);
+  let sum = 0;
+  for (let i = 0; i < padded; i += 4) sum = (sum + dv.getUint32(i)) >>> 0;
+  return sum;
+}
+
+function calcSearchParams(n) {
+  const es = Math.floor(Math.log2(n));
+  const sr = Math.pow(2, es) * 16;
+  return { searchRange: sr, entrySelector: es, rangeShift: n * 16 - sr };
+}
+
+function decodeNameString(bytes, platformID, encodingID) {
+  if (platformID === 3 || platformID === 0) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i += 2)
+      s += String.fromCharCode((bytes[i] << 8) | bytes[i + 1]);
+    return s;
+  }
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return s;
+}
+
+function encodeNameString(str, platformID, encodingID) {
+  if (platformID === 3 || platformID === 0) {
+    const b = new Uint8Array(str.length * 2);
+    for (let i = 0; i < str.length; i++) {
+      const c = str.charCodeAt(i);
+      b[i * 2] = (c >> 8) & 0xFF;
+      b[i * 2 + 1] = c & 0xFF;
+    }
+    return b;
+  }
+  const b = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) b[i] = str.charCodeAt(i) & 0xFF;
+  return b;
+}
+
+// ══════════════════════════════════════════════════════════
+// Parsing
+// ══════════════════════════════════════════════════════════
+
+function parseFont(buffer) {
+  fontBuffer = buffer;
+  const dv = new DataView(buffer);
+  sfVersion = dv.getUint32(0);
+
+  if (sfVersion !== 0x00010000 && sfVersion !== 0x4F54544F) {
+    throw new Error('Unsupported format. Expected TrueType (.ttf) or CFF OpenType (.otf).');
+  }
+
+  const numTables = dv.getUint16(4);
+  tableRecords = [];
+  tableData = new Map();
+
+  for (let i = 0; i < numTables; i++) {
+    const ro = 12 + i * 16;
+    const tag = readTag(dv, ro);
+    const checksum = dv.getUint32(ro + 4);
+    const offset = dv.getUint32(ro + 8);
+    const length = dv.getUint32(ro + 12);
+    tableRecords.push({ tag, checksum, offset, length });
+    tableData.set(tag, new Uint8Array(buffer.slice(offset, offset + length)));
+  }
+
+  headParsed = null; os2Parsed = null; nameRecords = [];
+  if (tableData.has('head')) {
+    headParsed = parseTableFields(tableData.get('head'), HEAD_LAYOUT);
+  }
+  if (tableData.has('OS/2')) {
+    const b = tableData.get('OS/2');
+    const v = new DataView(b.buffer, b.byteOffset, b.byteLength).getUint16(0);
+    os2Version = v;
+    os2Parsed = parseTableFields(b, getOS2Layout(v));
+  }
+  if (tableData.has('name')) {
+    nameRecords = parseNameTable(tableData.get('name'));
+  }
+
+  deletedTables.clear();
+  headEdits.clear();
+  os2Edits.clear();
+  nameEdits.clear();
+}
+
+function parseTableFields(bytes, layout) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const r = {};
+  for (const f of layout) r[f.name] = readField(dv, 0, f);
+  return r;
+}
+
+function parseNameTable(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  nameFormat = dv.getUint16(0);
+  const count = dv.getUint16(2);
+  const strOff = dv.getUint16(4);
+  const records = [];
+  for (let i = 0; i < count; i++) {
+    const ro = 6 + i * 12;
+    const platformID = dv.getUint16(ro);
+    const encodingID = dv.getUint16(ro + 2);
+    const languageID = dv.getUint16(ro + 4);
+    const nameID     = dv.getUint16(ro + 6);
+    const len        = dv.getUint16(ro + 8);
+    const off        = dv.getUint16(ro + 10);
+    const strBytes   = bytes.slice(strOff + off, strOff + off + len);
+    records.push({ platformID, encodingID, languageID, nameID,
+      string: decodeNameString(strBytes, platformID, encodingID) });
+  }
+  return records;
+}
+
+// ══════════════════════════════════════════════════════════
+// Formatting helpers
+// ══════════════════════════════════════════════════════════
+
+function decodeBitfield(val, bitsMap) {
+  if (val == null) return '';
+  const v = typeof val === 'number' ? val : parseInt(val);
+  const flags = [];
+  for (const [bit, name] of Object.entries(bitsMap))
+    if (v & (1 << parseInt(bit))) flags.push(name);
+  return flags.length ? flags.join(', ') : '(none)';
+}
+
+function hex32(val) {
+  if (val == null) return '';
+  return '0x' + (val >>> 0).toString(16).toUpperCase().padStart(8, '0');
+}
+
+function formatHeadValue(field, val) {
+  if (val == null) return '';
+  switch (field) {
+    case 'magicNumber': case 'checksumAdjustment': return hex32(val);
+    case 'fontRevision': return typeof val === 'number' ? val.toFixed(3) : String(val);
+    case 'flags': return `${val} \u2014 ${decodeBitfield(val, HEAD_FLAGS_BITS)}`;
+    case 'macStyle': return `${val} \u2014 ${decodeBitfield(val, MACSTYLE_BITS)}`;
+    case 'created': case 'modified':
+      if (val instanceof Date) return val.toISOString().replace('T',' ').replace(/\.000Z$/,' UTC');
+      return String(val);
+    case 'fontDirectionHint': {
+      const h = {0:'Mixed',1:'LTR only',2:'LTR + neutrals','-1':'RTL only','-2':'RTL + neutrals'};
+      return `${val}` + (h[val] ? ` (${h[val]})` : '');
+    }
+    case 'indexToLocFormat': return val === 0 ? '0 (short offsets)' : '1 (long offsets)';
+    default: return String(val);
+  }
+}
+
+function formatOS2Value(field, val) {
+  if (val == null) return '';
+  switch (field) {
+    case 'usWeightClass': return `${val}` + (WEIGHT_NAMES[val] ? ` (${WEIGHT_NAMES[val]})` : '');
+    case 'usWidthClass':  return `${val}` + (WIDTH_NAMES[val] ? ` (${WIDTH_NAMES[val]})` : '');
+    case 'fsType':      return `${val} \u2014 ${decodeBitfield(val, FSTYPE_BITS)}`;
+    case 'fsSelection': return `${val} \u2014 ${decodeBitfield(val, FSSELECTION_BITS)}`;
+    case 'panose': return Array.isArray(val) ? val.join(' ') : String(val);
+    case 'ulUnicodeRange1': case 'ulUnicodeRange2': case 'ulUnicodeRange3': case 'ulUnicodeRange4':
+    case 'ulCodePageRange1': case 'ulCodePageRange2': return hex32(val);
+    case 'sFamilyClass': return `${val} (class ${(val >> 8) & 0xFF}, subclass ${val & 0xFF})`;
+    default: return String(val);
+  }
+}
+
+function escHtml(s) {
+  if (!s && s !== 0) return '<span style="color:var(--text-dim)">\u2014</span>';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function formatSize(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1048576) return `${(n/1024).toFixed(1)} KB`;
+  return `${(n/1048576).toFixed(1)} MB`;
+}
+
+// ══════════════════════════════════════════════════════════
+// Value parsing (display string -> typed value)
+// ══════════════════════════════════════════════════════════
+
+function parseIntInput(s) {
+  s = s.trim();
+  for (const sep of [' \u2014', ' (', '  ']) {
+    const i = s.indexOf(sep);
+    if (i !== -1) s = s.substring(0, i).trim();
+  }
+  if (s.startsWith('0x') || s.startsWith('0X')) return parseInt(s, 16);
+  return parseInt(s, 10);
+}
+
+function parseDateInput(s) {
+  const c = s.trim().replace(' UTC', 'Z').replace(' ', 'T');
+  const d = new Date(c);
+  return isNaN(d.getTime()) ? new Date() : d;
+}
+
+function parseFieldValue(fDef, displayStr) {
+  const s = displayStr.trim();
+  switch (fDef.type) {
+    case 'uint16': case 'int16': case 'uint32': case 'int32':
+      return parseIntInput(s);
+    case 'fixed16.16': return parseFloat(s);
+    case 'longdatetime': return parseDateInput(s);
+    case 'tag': return s.substring(0, 4).padEnd(4, ' ');
+    case 'bytes': return s.split(/\s+/).map(v => parseInt(v, 10) || 0);
+    default: return s;
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// Name table helpers
+// ══════════════════════════════════════════════════════════
+
+function getOriginalNameValue(nameID) {
+  let best = null;
+  for (const r of nameRecords) {
+    if (r.nameID !== nameID) continue;
+    if (r.platformID === 3 && r.encodingID === 1 && r.languageID === 0x0409) return r.string;
+    if (r.platformID === 3 && best === null) best = r.string;
+    if (best === null) best = r.string;
+  }
+  return best ?? '';
+}
+
+function getUniqueNameIDs() {
+  const ids = new Set(nameRecords.map(r => r.nameID));
+  return [...ids].sort((a, b) => a - b);
+}
+
+function countRecordsForNameID(nameID) {
+  return nameRecords.filter(r => r.nameID === nameID).length;
+}
+
+// ══════════════════════════════════════════════════════════
+// Event handlers
+// ══════════════════════════════════════════════════════════
+
+const dropzone = document.getElementById('dropzone');
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('drag-over');
+  handleFile(e.dataTransfer.files);
+});
+
+function handleFile(fileList) {
+  const file = fileList[0];
+  if (!file) return;
+  const ext = file.name.toLowerCase().split('.').pop();
+  if (!['otf','ttf'].includes(ext)) {
+    alert('Supported formats: .otf, .ttf');
+    return;
+  }
+  file.arrayBuffer().then(buf => {
+    try {
+      fontFileName = file.name;
+      parseFont(buf);
+      updateFontInfo();
+      updateChangesCount();
+      render();
+    } catch (err) {
+      alert('Error: ' + err.message);
+      console.error(err);
+    }
+  });
+}
+
+function clearFont() {
+  fontBuffer = null; fontFileName = '';
+  tableRecords = []; tableData.clear(); deletedTables.clear();
+  headParsed = null; os2Parsed = null; nameRecords = [];
+  headEdits.clear(); os2Edits.clear(); nameEdits.clear();
+  updateFontInfo(); updateChangesCount(); render();
+}
+
+function updateFontInfo() {
+  const el = document.getElementById('fontInfo');
+  if (!fontBuffer) { el.textContent = 'No font loaded'; return; }
+  const fmt = sfVersion === 0x4F54544F ? 'CFF (OTF)' : 'TrueType (TTF)';
+  el.textContent = `${fontFileName} \u2014 ${fmt} \u2014 ${tableRecords.length} tables`;
+}
+
+function updateChangesCount() {
+  const el = document.getElementById('changesCount');
+  const btn = document.getElementById('downloadBtn');
+  const n = headEdits.size + os2Edits.size + nameEdits.size + deletedTables.size;
+  if (n > 0) {
+    el.textContent = `${n} edit${n !== 1 ? 's' : ''}`;
+    el.style.display = '';
+    btn.disabled = false;
+  } else {
+    el.style.display = 'none';
+    btn.disabled = true;
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// Rendering
+// ══════════════════════════════════════════════════════════
+
+function toggleSection(el) {
+  el.classList.toggle('collapsed');
+  const body = el.nextElementSibling;
+  if (body) body.style.display = el.classList.contains('collapsed') ? 'none' : '';
+}
+
+function render() {
+  const wrap = document.getElementById('tablesWrap');
+  if (!fontBuffer) {
+    wrap.innerHTML = '<div class="empty-state">Load a font file to begin</div>';
+    return;
+  }
+  let html = '';
+  html += renderTableDirectory();
+  if (headParsed) html += renderFieldSection('head table', 'head', HEAD_LAYOUT, headParsed, headEdits, formatHeadValue);
+  if (nameRecords.length) html += renderNameSection();
+  if (os2Parsed) html += renderFieldSection('OS/2 table', 'OS/2', getOS2Layout(os2Version), os2Parsed, os2Edits, formatOS2Value);
+  wrap.innerHTML = html;
+}
+
+function renderTableDirectory() {
+  let html = `<div class="section-header" onclick="toggleSection(this)">
+    <span class="arrow">\u25bc</span> Table Directory (${tableRecords.length} tables)
+  </div><div class="section-body">
+  <table class="dir-table"><thead><tr>
+    <th style="width:40px">Del</th><th style="width:80px">Tag</th>
+    <th style="width:100px">Size</th><th>Checksum</th>
+  </tr></thead><tbody>`;
+
+  for (const rec of tableRecords) {
+    const isDel = deletedTables.has(rec.tag);
+    const cls = isDel ? ' class="row-deleted"' : '';
+    html += `<tr${cls}>
+      <td class="del-cell"><input type="checkbox" ${isDel?'checked':''} onchange="toggleTableDelete('${rec.tag}')"></td>
+      <td class="tag-cell">${rec.tag}</td>
+      <td class="size-cell">${formatSize(rec.length)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${hex32(rec.checksum)}</td>
+    </tr>`;
+  }
+  html += '</tbody></table></div>';
+  return html;
+}
+
+function renderFieldSection(title, tableName, layout, parsed, edits, formatter) {
+  let html = `<div class="section-header" onclick="toggleSection(this)">
+    <span class="arrow">\u25bc</span> ${title}
+  </div><div class="section-body">
+  <table class="fields"><thead><tr>
+    <th class="param-col">Field</th><th>Value</th>
+  </tr></thead><tbody>`;
+
+  for (const f of layout) {
+    const origVal = formatter(f.name, parsed[f.name]);
+    const isEdited = edits.has(f.name);
+    const displayVal = isEdited ? edits.get(f.name) : origVal;
+    const ro = f.readonly ? ' readonly' : '';
+    const editedCls = isEdited ? ' edited' : '';
+
+    if (f.readonly) {
+      html += `<tr><td class="param-name">${f.name}</td>
+        <td class="val readonly">${escHtml(displayVal)}</td></tr>`;
+    } else {
+      html += `<tr><td class="param-name">${f.name}</td>
+        <td class="val${editedCls}" ondblclick="startFieldEdit(this,'${tableName}','${f.name}')">${escHtml(displayVal)}</td></tr>`;
+    }
+  }
+  html += '</tbody></table></div>';
+  return html;
+}
+
+function renderNameSection() {
+  const ids = getUniqueNameIDs();
+  let html = `<div class="section-header" onclick="toggleSection(this)">
+    <span class="arrow">\u25bc</span> name table
+  </div><div class="section-body">
+  <table class="fields"><thead><tr>
+    <th class="param-col">Name ID</th><th>Value</th>
+  </tr></thead><tbody>`;
+
+  for (const id of ids) {
+    const origVal = getOriginalNameValue(id);
+    const isEdited = nameEdits.has(id);
+    const editVal = isEdited ? nameEdits.get(id) : null;
+    const isDelete = editVal === null && isEdited;
+    const displayVal = isDelete ? null : (isEdited ? editVal : origVal);
+    const editedCls = isEdited ? (isDelete ? ' edited marked-delete' : ' edited') : '';
+
+    const label = NAME_IDS[id] ? `${id} \u2014 ${NAME_IDS[id]}` : `${id}`;
+    const recCount = countRecordsForNameID(id);
+    const badge = `<span class="badge">${recCount} rec</span>`;
+
+    const cellContent = isDelete
+      ? '<span style="color:var(--red);font-style:italic;">\u232b DELETE</span>'
+      : escHtml(displayVal);
+
+    html += `<tr><td class="param-name">${label}${badge}</td>
+      <td class="val${editedCls}" ondblclick="startNameEdit(this,${id})">${cellContent}</td></tr>`;
+  }
+  html += '</tbody></table></div>';
+  return html;
+}
+
+// ══════════════════════════════════════════════════════════
+// Editing
+// ══════════════════════════════════════════════════════════
+
+function toggleTableDelete(tag) {
+  if (deletedTables.has(tag)) deletedTables.delete(tag);
+  else deletedTables.add(tag);
+  updateChangesCount();
+  render();
+}
+
+function startFieldEdit(td, tableName, fieldName) {
+  if (td.classList.contains('editing')) return;
+  td.classList.add('editing');
+
+  const edits = tableName === 'head' ? headEdits : os2Edits;
+  const parsed = tableName === 'head' ? headParsed : os2Parsed;
+  const formatter = tableName === 'head' ? formatHeadValue : formatOS2Value;
+  const origVal = formatter(fieldName, parsed[fieldName]);
+  const editVal = edits.has(fieldName) ? edits.get(fieldName) : origVal;
+
+  const textarea = document.createElement('textarea');
+  textarea.className = 'cell-edit';
+  textarea.value = editVal;
+  td.innerHTML = '';
+  td.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  const finish = () => {
+    const newVal = textarea.value;
+    td.classList.remove('editing');
+    if (newVal !== origVal) {
+      edits.set(fieldName, newVal);
+      td.classList.add('edited');
+    } else {
+      edits.delete(fieldName);
+      td.classList.remove('edited');
+    }
+    td.innerHTML = escHtml(newVal);
+    if (edits.has(fieldName)) td.classList.add('edited');
+    updateChangesCount();
+  };
+
+  textarea.addEventListener('blur', finish);
+  textarea.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { textarea.value = origVal; textarea.blur(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); textarea.blur(); }
+  });
+}
+
+function startNameEdit(td, nameID) {
+  if (td.classList.contains('editing')) return;
+  td.classList.add('editing');
+
+  const origVal = getOriginalNameValue(nameID);
+  let editVal;
+  if (nameEdits.has(nameID)) {
+    const v = nameEdits.get(nameID);
+    editVal = v === null ? '' : v;
+  } else {
+    editVal = origVal;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.className = 'cell-edit';
+  textarea.value = editVal;
+  td.innerHTML = '';
+  td.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  const finish = () => {
+    const newVal = textarea.value;
+    td.classList.remove('editing');
+
+    if (newVal !== origVal) {
+      if (newVal.trim() === '' && origVal !== '') {
+        nameEdits.set(nameID, null);
+        td.innerHTML = '<span style="color:var(--red);font-style:italic;">\u232b DELETE</span>';
+        td.classList.add('edited');
+        td.classList.add('marked-delete');
+      } else {
+        nameEdits.set(nameID, newVal);
+        td.innerHTML = escHtml(newVal);
+        td.classList.add('edited');
+        td.classList.remove('marked-delete');
+      }
+    } else {
+      nameEdits.delete(nameID);
+      td.innerHTML = escHtml(origVal);
+      td.classList.remove('edited');
+      td.classList.remove('marked-delete');
+    }
+    updateChangesCount();
+  };
+
+  textarea.addEventListener('blur', finish);
+  textarea.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { textarea.value = origVal; textarea.blur(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); textarea.blur(); }
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+// Serialization
+// ══════════════════════════════════════════════════════════
+
+function serializeHeadTable() {
+  const orig = tableData.get('head');
+  if (!orig) return null;
+  const out = new Uint8Array(orig);
+  const dv = new DataView(out.buffer, out.byteOffset, out.byteLength);
+  for (const [fieldName, displayStr] of headEdits) {
+    const fDef = HEAD_LAYOUT.find(f => f.name === fieldName);
+    if (!fDef || fDef.readonly) continue;
+    writeField(dv, 0, fDef, parseFieldValue(fDef, displayStr));
+  }
+  dv.setUint32(8, 0); // checksumAdjustment zeroed for rebuild
+  return out;
+}
+
+function serializeOS2Table() {
+  const orig = tableData.get('OS/2');
+  if (!orig) return null;
+  const out = new Uint8Array(orig);
+  const dv = new DataView(out.buffer, out.byteOffset, out.byteLength);
+  const layout = getOS2Layout(os2Version);
+  for (const [fieldName, displayStr] of os2Edits) {
+    const fDef = layout.find(f => f.name === fieldName);
+    if (!fDef || fDef.readonly) continue;
+    writeField(dv, 0, fDef, parseFieldValue(fDef, displayStr));
+  }
+  return out;
+}
+
+function serializeNameTable() {
+  const newRecs = [];
+  for (const rec of nameRecords) {
+    if (nameEdits.has(rec.nameID)) {
+      const v = nameEdits.get(rec.nameID);
+      if (v === null) continue; // deleted
+      newRecs.push({ ...rec, string: v });
+    } else {
+      newRecs.push(rec);
+    }
+  }
+
+  newRecs.sort((a, b) =>
+    a.platformID - b.platformID || a.encodingID - b.encodingID ||
+    a.languageID - b.languageID || a.nameID - b.nameID);
+
+  const encoded = newRecs.map(r => encodeNameString(r.string, r.platformID, r.encodingID));
+  const headerSize = 6;
+  const recsSize = newRecs.length * 12;
+  const strOffset = headerSize + recsSize;
+  let totalStr = 0;
+  for (const e of encoded) totalStr += e.length;
+
+  const buf = new ArrayBuffer(strOffset + totalStr);
+  const dv = new DataView(buf);
+  const bytes = new Uint8Array(buf);
+
+  dv.setUint16(0, 0); // format 0
+  dv.setUint16(2, newRecs.length);
+  dv.setUint16(4, strOffset);
+
+  let sp = 0;
+  for (let i = 0; i < newRecs.length; i++) {
+    const r = newRecs[i];
+    const sb = encoded[i];
+    const ro = 6 + i * 12;
+    dv.setUint16(ro, r.platformID);
+    dv.setUint16(ro + 2, r.encodingID);
+    dv.setUint16(ro + 4, r.languageID);
+    dv.setUint16(ro + 6, r.nameID);
+    dv.setUint16(ro + 8, sb.length);
+    dv.setUint16(ro + 10, sp);
+    bytes.set(sb, strOffset + sp);
+    sp += sb.length;
+  }
+  return new Uint8Array(buf);
+}
+
+// ══════════════════════════════════════════════════════════
+// Rebuild & Download
+// ══════════════════════════════════════════════════════════
+
+function rebuildFont() {
+  const tags = tableRecords.map(r => r.tag).filter(t => !deletedTables.has(t));
+  const numTables = tags.length;
+  const { searchRange, entrySelector, rangeShift } = calcSearchParams(numTables);
+
+  // Prepare final table bytes
+  const finalData = new Map();
+  for (const tag of tags) {
+    if (tag === 'head') {
+      finalData.set(tag, headEdits.size > 0 ? serializeHeadTable() : new Uint8Array(tableData.get('head')));
+      // Zero checksumAdjustment
+      const hd = finalData.get(tag);
+      new DataView(hd.buffer, hd.byteOffset, hd.byteLength).setUint32(8, 0);
+    } else if (tag === 'OS/2' && os2Edits.size > 0) {
+      finalData.set(tag, serializeOS2Table());
+    } else if (tag === 'name' && nameEdits.size > 0) {
+      finalData.set(tag, serializeNameTable());
+    } else {
+      finalData.set(tag, tableData.get(tag));
+    }
+  }
+
+  // Layout: header (12) + directory (numTables*16) + table data (4-aligned)
+  const headerSize = 12;
+  const dirSize = numTables * 16;
+  let offset = headerSize + dirSize;
+  const offsets = new Map();
+
+  for (const tag of tags) {
+    offset = (offset + 3) & ~3;
+    offsets.set(tag, offset);
+    offset += finalData.get(tag).length;
+  }
+
+  const totalSize = (offset + 3) & ~3;
+  const buf = new ArrayBuffer(totalSize);
+  const dv = new DataView(buf);
+  const bytes = new Uint8Array(buf);
+
+  // Offset table header
+  dv.setUint32(0, sfVersion);
+  dv.setUint16(4, numTables);
+  dv.setUint16(6, searchRange);
+  dv.setUint16(8, entrySelector);
+  dv.setUint16(10, rangeShift);
+
+  // Write tables and directory entries
+  for (let i = 0; i < tags.length; i++) {
+    const tag = tags[i];
+    const data = finalData.get(tag);
+    const tOff = offsets.get(tag);
+    bytes.set(data, tOff);
+    const cs = calcTableChecksum(data);
+    const ro = 12 + i * 16;
+    writeTag(dv, ro, tag);
+    dv.setUint32(ro + 4, cs);
+    dv.setUint32(ro + 8, tOff);
+    dv.setUint32(ro + 12, data.length);
+  }
+
+  // checksumAdjustment
+  if (tags.includes('head')) {
+    const headOff = offsets.get('head');
+    dv.setUint32(headOff + 8, 0);
+    const fileCS = calcTableChecksum(bytes);
+    dv.setUint32(headOff + 8, (0xB1B0AFBA - fileCS) >>> 0);
+  }
+
+  return buf;
+}
+
+function downloadFont() {
+  const buf = rebuildFont();
+  const ext = fontFileName.split('.').pop();
+  const stem = fontFileName.replace(/\.[^.]+$/, '');
+  const outName = `${stem}.patched.${ext}`;
+
+  const blob = new Blob([buf], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = outName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Init ──
+render();
+</script>
+</body>
+</html>

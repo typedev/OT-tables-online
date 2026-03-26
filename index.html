@@ -232,6 +232,12 @@ table.compare tbody td.val.edited::after {
   color: var(--blue);
   font-size: 8px;
 }
+table.compare tbody td.val.marked-delete {
+  background: rgba(212,80,80,0.12) !important;
+}
+table.compare tbody td.val.marked-delete::after {
+  content: none;
+}
 table.compare tbody td.val textarea.cell-edit {
   width: 100%;
   height: 100%;
@@ -543,13 +549,12 @@ function updateChangesCount() {
 }
 
 // ── Editing ──
-function startEdit(td, fontIdx, tableName, field, currentDisplayValue) {
+function startEdit(td, fontIdx, tableName, field) {
   if (td.classList.contains('editing')) return;
   td.classList.add('editing');
 
-  // Get the raw editable value (strip decoded annotations for OS/2 and head)
   const key = fonts[fontIdx].fileName + '|' + tableName + '|' + field;
-  let editVal = pendingChanges.has(key) ? pendingChanges.get(key).new_value : currentDisplayValue;
+  let editVal = pendingChanges.has(key) ? pendingChanges.get(key).new_value : getOriginalDisplayValue(fontIdx, tableName, field);
 
   const textarea = document.createElement('textarea');
   textarea.className = 'cell-edit';
@@ -567,20 +572,32 @@ function startEdit(td, fontIdx, tableName, field, currentDisplayValue) {
     const origDisplay = getOriginalDisplayValue(fontIdx, tableName, field);
 
     if (newVal !== origDisplay) {
-      pendingChanges.set(key, {
+      const change = {
         file: fonts[fontIdx].fileName,
         table: tableName,
         field: field,
         old_value: origDisplay,
         new_value: newVal,
-      });
+      };
+      // Empty value in name table = delete the record
+      if (tableName === 'name' && newVal.trim() === '' && origDisplay !== '') {
+        change.action = 'delete';
+      }
+      pendingChanges.set(key, change);
       td.classList.add('edited');
     } else {
       pendingChanges.delete(key);
       td.classList.remove('edited');
     }
 
-    td.innerHTML = formatCell(newVal);
+    const ch = pendingChanges.get(key);
+    if (ch && ch.action === 'delete') {
+      td.innerHTML = '<span style="color:var(--red); font-style:italic;">\u232b DELETE</span>';
+      td.classList.add('marked-delete');
+    } else {
+      td.innerHTML = formatCell(newVal);
+      td.classList.remove('marked-delete');
+    }
     if (pendingChanges.has(key)) td.classList.add('edited');
     updateChangesCount();
   };
@@ -705,10 +722,14 @@ function buildCompareTable(title, tableName, getRowData, formatVal) {
       <td class="param-name">${label}</td>`;
     vals.forEach((v, i) => {
       const key = fonts[i].fileName + '|' + tableName + '|' + field;
-      const isEdited = pendingChanges.has(key);
-      const displayVal = isEdited ? pendingChanges.get(key).new_value : v;
-      const editedClass = isEdited ? ' edited' : '';
-      html += `<td class="val${editedClass}" ondblclick="startEdit(this, ${i}, '${tableName}', '${field}', ${JSON.stringify(displayVal || '')})">${formatCell(displayVal)}</td>`;
+      const change = pendingChanges.get(key);
+      const isEdited = !!change;
+      const isDelete = change && change.action === 'delete';
+      const editedClass = isEdited ? (isDelete ? ' edited marked-delete' : ' edited') : '';
+      const cellContent = isDelete
+        ? '<span style="color:var(--red); font-style:italic;">\u232b DELETE</span>'
+        : formatCell(isEdited ? change.new_value : v);
+      html += `<td class="val${editedClass}" ondblclick="startEdit(this, ${i}, '${tableName}', '${field}')">${cellContent}</td>`;
     });
     html += `</tr>`;
   }

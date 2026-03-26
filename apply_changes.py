@@ -62,6 +62,18 @@ def apply_name_change(font, name_id, new_value):
     return True
 
 
+def delete_name_record(font, name_id):
+    """Remove all name records with the given nameID."""
+    name_id = int(name_id)
+    name_table = font["name"]
+    before = len(name_table.names)
+    name_table.names = [r for r in name_table.names if r.nameID != name_id]
+    removed = before - len(name_table.names)
+    if removed:
+        print(f"    Removed {removed} record(s) for nameID {name_id}")
+    return removed > 0
+
+
 # ── OS/2 table helpers ──
 
 OS2_INT_FIELDS = {
@@ -223,7 +235,10 @@ def process_changes(folder_path):
 
                 ok = False
                 if table == "name":
-                    ok = apply_name_change(font, field, new_val)
+                    if ch.get("action") == "delete":
+                        ok = delete_name_record(font, field)
+                    else:
+                        ok = apply_name_change(font, field, new_val)
                 elif table == "OS/2":
                     ok = apply_os2_change(font, field, new_val)
                 elif table == "head":
