@@ -172,6 +172,23 @@ table.compare td.size-cell {
   white-space: nowrap;
 }
 .show-full-btn:hover { color: var(--accent-dim); }
+.btn-add-name {
+  font-family: var(--font-mono); font-size: 11px; padding: 2px 8px;
+  border: 1px solid var(--border-accent); background: var(--bg-surface);
+  color: var(--green); cursor: pointer; border-radius: 3px; margin-left: auto;
+}
+.btn-add-name:hover { background: var(--bg-row); border-color: var(--green); }
+.name-id-dropdown {
+  position: absolute; z-index: 10; background: var(--bg-surface);
+  border: 1px solid var(--border-accent); border-radius: 4px;
+  max-height: 300px; overflow-y: auto; min-width: 260px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+.name-id-dropdown .item {
+  padding: 5px 12px; font-family: var(--font-mono); font-size: 11px;
+  cursor: pointer; color: var(--text);
+}
+.name-id-dropdown .item:hover { background: var(--bg-row); color: var(--accent); }
 </style>
 </head>
 <body>
@@ -215,6 +232,7 @@ const fonts = [];
 
 const pendingChanges = new Map(); // "fileName|table|field" -> change object
 const deletedTables = new Set();  // tags to delete from all fonts
+const addedNameIds = new Set();   // name IDs manually added by user
 
 // ══════════════════════════════════════════════════════════
 // Constants
@@ -473,6 +491,113 @@ function parseBinaryNameTable(bytes) {
   return records;
 }
 
+function parseSTAT(bytes) {
+  if (!bytes || bytes.length < 20) return null;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const majorVersion = dv.getUint16(0);
+  const minorVersion = dv.getUint16(2);
+  const designAxisSize = dv.getUint16(4);
+  const designAxisCount = dv.getUint16(6);
+  const designAxesOffset = dv.getUint32(8);
+  const axisValueCount = dv.getUint16(12);
+  const offsetToAxisValueOffsets = dv.getUint32(14);
+  const elidedFallbackNameID = (majorVersion > 1 || (majorVersion === 1 && minorVersion >= 1))
+    ? dv.getUint16(18) : null;
+
+  const axes = [];
+  for (let i = 0; i < designAxisCount; i++) {
+    const ao = designAxesOffset + i * designAxisSize;
+    axes.push({
+      tag: readTag(dv, ao),
+      nameID: dv.getUint16(ao + 4),
+      axisOrdering: dv.getUint16(ao + 6),
+    });
+  }
+
+  const axisValues = [];
+  if (axisValueCount > 0 && offsetToAxisValueOffsets > 0) {
+    for (let i = 0; i < axisValueCount; i++) {
+      const avOffset = offsetToAxisValueOffsets + dv.getUint16(offsetToAxisValueOffsets + i * 2);
+      const format = dv.getUint16(avOffset);
+      const av = { format };
+      switch (format) {
+        case 1:
+          av.axisIndex = dv.getUint16(avOffset + 2);
+          av.flags = dv.getUint16(avOffset + 4);
+          av.nameID = dv.getUint16(avOffset + 6);
+          av.value = dv.getInt32(avOffset + 8) / 65536.0;
+          break;
+        case 2:
+          av.axisIndex = dv.getUint16(avOffset + 2);
+          av.flags = dv.getUint16(avOffset + 4);
+          av.nameID = dv.getUint16(avOffset + 6);
+          av.nominalValue = dv.getInt32(avOffset + 8) / 65536.0;
+          av.rangeMinValue = dv.getInt32(avOffset + 12) / 65536.0;
+          av.rangeMaxValue = dv.getInt32(avOffset + 16) / 65536.0;
+          break;
+        case 3:
+          av.axisIndex = dv.getUint16(avOffset + 2);
+          av.flags = dv.getUint16(avOffset + 4);
+          av.nameID = dv.getUint16(avOffset + 6);
+          av.value = dv.getInt32(avOffset + 8) / 65536.0;
+          av.linkedValue = dv.getInt32(avOffset + 12) / 65536.0;
+          break;
+        case 4:
+          av.flags = dv.getUint16(avOffset + 2);
+          av.nameID = dv.getUint16(avOffset + 4);
+          const axCount = dv.getUint16(avOffset + 6);
+          av.values = [];
+          for (let j = 0; j < axCount; j++) {
+            av.values.push({
+              axisIndex: dv.getUint16(avOffset + 8 + j * 6),
+              value: dv.getInt32(avOffset + 10 + j * 6) / 65536.0,
+            });
+          }
+          break;
+      }
+      axisValues.push(av);
+    }
+  }
+  return { majorVersion, minorVersion, axes, axisValues, elidedFallbackNameID };
+}
+
+function parseFvarAxisTags(bytes) {
+  if (!bytes || bytes.length < 16) return [];
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const axesArrayOffset = dv.getUint16(4);
+  const axisCount = dv.getUint16(8);
+  const axisSize = dv.getUint16(10);
+  const tags = [];
+  for (let i = 0; i < axisCount; i++) {
+    tags.push(readTag(dv, axesArrayOffset + i * axisSize));
+  }
+  return tags;
+}
+
+function parseAvar(bytes) {
+  if (!bytes || bytes.length < 8) return null;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const majorVersion = dv.getUint16(0);
+  const minorVersion = dv.getUint16(2);
+  const axisCount = dv.getUint16(6);
+  const axes = [];
+  let offset = 8;
+  for (let i = 0; i < axisCount; i++) {
+    const pairCount = dv.getUint16(offset);
+    offset += 2;
+    const pairs = [];
+    for (let j = 0; j < pairCount; j++) {
+      pairs.push({
+        from: dv.getInt16(offset) / 16384.0,
+        to: dv.getInt16(offset + 2) / 16384.0,
+      });
+      offset += 4;
+    }
+    axes.push({ pairs });
+  }
+  return { majorVersion, minorVersion, axisCount, axes };
+}
+
 // ══════════════════════════════════════════════════════════
 // Value parsing (display string -> typed value for binary)
 // ══════════════════════════════════════════════════════════
@@ -569,6 +694,16 @@ function extractHead(font) {
   return result;
 }
 
+function resolveNameID(font, nameID) {
+  if (font.nameTable && font.nameTable[nameID] != null) return font.nameTable[nameID];
+  if (font.binaryNameRecords) {
+    const rec = font.binaryNameRecords.find(r => r.nameID === nameID && r.platformID === 3 && r.languageID === 0x0409)
+             || font.binaryNameRecords.find(r => r.nameID === nameID);
+    if (rec) return rec.string;
+  }
+  return null;
+}
+
 function formatOS2Value(field, val) {
   if (val == null || val === undefined) return '';
   switch (field) {
@@ -660,6 +795,7 @@ function clearAll() {
   fonts.length = 0;
   pendingChanges.clear();
   deletedTables.clear();
+  addedNameIds.clear();
   updateCount(); updateChangesCount(); renderTables();
 }
 
@@ -861,6 +997,55 @@ function toggleSection(el) {
   if (body) body.style.display = el.classList.contains('collapsed') ? 'none' : '';
 }
 
+// ── Add Name ID ──
+
+function showAddNameIdMenu(event) {
+  event.stopPropagation();
+  // Remove existing dropdown
+  const old = document.querySelector('.name-id-dropdown');
+  if (old) { old.remove(); return; }
+
+  // Compute visible IDs
+  const visible = new Set();
+  for (const f of fonts)
+    if (f.nameTable) Object.keys(f.nameTable).forEach(k => visible.add(String(k)));
+  addedNameIds.forEach(id => visible.add(String(id)));
+  for (const key of pendingChanges.keys()) {
+    const parts = key.split('|');
+    if (parts[1] === 'name') visible.add(parts[2]);
+  }
+
+  // Available IDs
+  const available = Object.keys(NAME_IDS).filter(id => !visible.has(String(id)))
+    .sort((a, b) => parseInt(a) - parseInt(b));
+  if (available.length === 0) return;
+
+  const dd = document.createElement('div');
+  dd.className = 'name-id-dropdown';
+  for (const id of available) {
+    const item = document.createElement('div');
+    item.className = 'item';
+    item.textContent = `${id} \u2014 ${NAME_IDS[id]}`;
+    item.onclick = (e) => { e.stopPropagation(); addNameId(parseInt(id)); dd.remove(); };
+    dd.appendChild(item);
+  }
+
+  const btn = event.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  dd.style.position = 'fixed';
+  dd.style.top = (rect.bottom + 4) + 'px';
+  dd.style.left = rect.left + 'px';
+  document.body.appendChild(dd);
+
+  const close = (e) => { if (!dd.contains(e.target)) { dd.remove(); document.removeEventListener('mousedown', close); } };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
+
+function addNameId(id) {
+  addedNameIds.add(id);
+  renderTables();
+}
+
 // ── Table Directory ──
 
 function renderTableDirectory() {
@@ -902,7 +1087,7 @@ function renderTableDirectory() {
 
 // ── Comparison tables ──
 
-function buildCompareTable(title, tableName, getRowData, formatVal) {
+function buildCompareTable(title, tableName, getRowData, formatVal, extraFields) {
   if (fonts.length === 0) return '';
   const showEmpty = document.getElementById('showEmpty').checked;
   const diffOnly = document.getElementById('diffOnly').checked;
@@ -910,6 +1095,7 @@ function buildCompareTable(title, tableName, getRowData, formatVal) {
   const allFields = new Set();
   const datas = fonts.map(f => getRowData(f) || {});
   datas.forEach(d => Object.keys(d).forEach(k => allFields.add(k)));
+  if (extraFields) extraFields.forEach(k => allFields.add(String(k)));
   const fields = [...allFields].sort((a, b) => {
     const na = parseInt(a), nb = parseInt(b);
     if (!isNaN(na) && !isNaN(nb)) return na - nb;
@@ -917,8 +1103,11 @@ function buildCompareTable(title, tableName, getRowData, formatVal) {
   });
 
   let html = `<div class="section-header" onclick="toggleSection(this)">
-    <span class="arrow">\u25bc</span> ${title}
-  </div><div class="section-body">
+    <span class="arrow">\u25bc</span> ${title}`;
+  if (tableName === 'name') {
+    html += ` <span class="btn-add-name" onclick="event.stopPropagation(); showAddNameIdMenu(event)" title="Add name record">+ Add ID</span>`;
+  }
+  html += `</div><div class="section-body">
   <table class="compare"><thead><tr>
     <th class="param-col">Parameter</th>`;
   fonts.forEach((f, i) => {
@@ -960,6 +1149,160 @@ function buildCompareTable(title, tableName, getRowData, formatVal) {
   return html;
 }
 
+// ── STAT table (read-only) ──
+
+function formatSTATAxisValue(av, axes, font) {
+  const name = resolveNameID(font, av.nameID);
+  const nameStr = name ? `"${name}"` : `nameID ${av.nameID}`;
+  const elidable = (av.flags & 0x0002) ? ' [ELIDABLE]' : '';
+  const getTag = (idx) => (axes && axes[idx]) ? axes[idx].tag : `axis${idx}`;
+  switch (av.format) {
+    case 1: return `${getTag(av.axisIndex)} ${av.value} ${nameStr}${elidable}`;
+    case 2: return `${getTag(av.axisIndex)} ${av.nominalValue} [${av.rangeMinValue}..${av.rangeMaxValue}] ${nameStr}${elidable}`;
+    case 3: return `${getTag(av.axisIndex)} ${av.value} \u2192 ${av.linkedValue} ${nameStr}${elidable}`;
+    case 4: {
+      const parts = av.values.map(v => `${getTag(v.axisIndex)}=${v.value}`);
+      return `${parts.join(', ')} ${nameStr}${elidable}`;
+    }
+    default: return `fmt${av.format} ${nameStr}`;
+  }
+}
+
+function renderSTAT() {
+  if (fonts.length === 0) return '';
+  const hasSTAT = fonts.some(f => f.binaryData && f.binaryData.has('STAT'));
+  if (!hasSTAT) return '';
+
+  const statData = fonts.map(f => {
+    if (!f.binaryData || !f.binaryData.has('STAT')) return null;
+    return parseSTAT(f.binaryData.get('STAT'));
+  });
+
+  let html = `<div class="section-header" onclick="toggleSection(this)">
+    <span class="arrow">\u25bc</span> STAT table
+  </div><div class="section-body">`;
+
+  // Design Axes
+  const maxAxes = Math.max(0, ...statData.map(s => s ? s.axes.length : 0));
+  if (maxAxes > 0) {
+    html += `<div style="font-family:var(--font-mono);font-size:12px;color:var(--text-label);margin:12px 0 4px;font-weight:600;">Design Axes</div>`;
+    html += `<table class="compare"><thead><tr><th class="param-col">Axis</th>`;
+    fonts.forEach(f => { html += `<th><span class="fname" title="${f.fileName}">${f.fileName}</span></th>`; });
+    html += `</tr></thead><tbody>`;
+    for (let i = 0; i < maxAxes; i++) {
+      const vals = statData.map((s, fi) => {
+        if (!s || i >= s.axes.length) return '\u2014';
+        const ax = s.axes[i];
+        const name = resolveNameID(fonts[fi], ax.nameID);
+        return `${ax.tag} \u2014 "${name || 'nameID ' + ax.nameID}" (order: ${ax.axisOrdering})`;
+      });
+      const allSame = vals.every(v => v === vals[0]);
+      html += `<tr class="${!allSame ? 'has-diff' : ''}${i % 2 === 0 ? '' : ''}">`;
+      html += `<td class="param-name">Axis ${i}</td>`;
+      vals.forEach(v => { html += `<td class="val">${escHtml(v)}</td>`; });
+      html += `</tr>`;
+    }
+    html += `</tbody></table>`;
+  }
+
+  // Axis Values
+  const maxAV = Math.max(0, ...statData.map(s => s ? s.axisValues.length : 0));
+  if (maxAV > 0) {
+    html += `<div style="font-family:var(--font-mono);font-size:12px;color:var(--text-label);margin:12px 0 4px;font-weight:600;">Axis Values</div>`;
+    html += `<table class="compare"><thead><tr><th class="param-col">#</th>`;
+    fonts.forEach(f => { html += `<th><span class="fname" title="${f.fileName}">${f.fileName}</span></th>`; });
+    html += `</tr></thead><tbody>`;
+    for (let i = 0; i < maxAV; i++) {
+      const vals = statData.map((s, fi) => {
+        if (!s || i >= s.axisValues.length) return '\u2014';
+        return formatSTATAxisValue(s.axisValues[i], s.axes, fonts[fi]);
+      });
+      const allSame = vals.every(v => v === vals[0]);
+      html += `<tr class="${!allSame ? 'has-diff' : ''}">`;
+      html += `<td class="param-name">${i}</td>`;
+      vals.forEach(v => { html += `<td class="val">${escHtml(v)}</td>`; });
+      html += `</tr>`;
+    }
+    html += `</tbody></table>`;
+  }
+
+  // Elided Fallback Name ID
+  const hasElided = statData.some(s => s && s.elidedFallbackNameID != null);
+  if (hasElided) {
+    html += `<div style="font-family:var(--font-mono);font-size:12px;color:var(--text-label);margin:12px 0 4px;font-weight:600;">Elided Fallback</div>`;
+    html += `<table class="compare"><thead><tr><th class="param-col">Parameter</th>`;
+    fonts.forEach(f => { html += `<th><span class="fname" title="${f.fileName}">${f.fileName}</span></th>`; });
+    html += `</tr></thead><tbody><tr>`;
+    html += `<td class="param-name">elidedFallbackNameID</td>`;
+    const vals = statData.map((s, fi) => {
+      if (!s || s.elidedFallbackNameID == null) return '\u2014';
+      const name = resolveNameID(fonts[fi], s.elidedFallbackNameID);
+      return `${s.elidedFallbackNameID} \u2014 "${name || '?'}"`;
+    });
+    const allSame = vals.every(v => v === vals[0]);
+    vals.forEach(v => { html += `<td class="val">${escHtml(v)}</td>`; });
+    html += `</tr></tbody></table>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+// ── avar table (read-only) ──
+
+function renderAvar() {
+  if (fonts.length === 0) return '';
+  const hasAvar = fonts.some(f => f.binaryData && f.binaryData.has('avar'));
+  if (!hasAvar) return '';
+
+  const avarData = fonts.map(f => {
+    if (!f.binaryData || !f.binaryData.has('avar')) return null;
+    return parseAvar(f.binaryData.get('avar'));
+  });
+  const fvarTags = fonts.map(f => {
+    if (!f.binaryData || !f.binaryData.has('fvar')) return [];
+    return parseFvarAxisTags(f.binaryData.get('fvar'));
+  });
+
+  let html = `<div class="section-header" onclick="toggleSection(this)">
+    <span class="arrow">\u25bc</span> avar table
+  </div><div class="section-body">`;
+
+  const maxAxes = Math.max(0, ...avarData.map(a => a ? a.axisCount : 0));
+
+  for (let ai = 0; ai < maxAxes; ai++) {
+    const axisLabels = fvarTags.map(tags => tags[ai] || `axis${ai}`);
+    const label = [...new Set(axisLabels)].join(' / ');
+
+    html += `<div style="font-family:var(--font-mono);font-size:12px;color:var(--text-label);margin:12px 0 4px;font-weight:600;">Axis: ${label}</div>`;
+    html += `<table class="compare"><thead><tr><th class="param-col">#</th>`;
+    fonts.forEach(f => { html += `<th><span class="fname" title="${f.fileName}">${f.fileName}</span></th>`; });
+    html += `</tr></thead><tbody>`;
+
+    const maxPairs = Math.max(0, ...avarData.map(a => {
+      if (!a || ai >= a.axes.length) return 0;
+      return a.axes[ai].pairs.length;
+    }));
+
+    for (let pi = 0; pi < maxPairs; pi++) {
+      const vals = avarData.map(a => {
+        if (!a || ai >= a.axes.length || pi >= a.axes[ai].pairs.length) return '';
+        const p = a.axes[ai].pairs[pi];
+        return `${p.from.toFixed(4)} \u2192 ${p.to.toFixed(4)}`;
+      });
+      const allSame = vals.every(v => v === vals[0]);
+      html += `<tr class="${!allSame ? 'has-diff' : ''}">`;
+      html += `<td class="param-name">${pi}</td>`;
+      vals.forEach(v => { html += `<td class="val">${v ? escHtml(v) : '\u2014'}</td>`; });
+      html += `</tr>`;
+    }
+    html += `</tbody></table>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
 function renderTables() {
   const wrap = document.getElementById('tablesWrap');
   if (fonts.length === 0) {
@@ -970,8 +1313,10 @@ function renderTables() {
   let html = '';
   html += renderTableDirectory();
   html += buildCompareTable('head table', 'head', f => f.headTable, formatHeadValue);
-  html += buildCompareTable('name table', 'name', f => f.nameTable, (field, val) => val != null ? String(val) : '');
+  html += buildCompareTable('name table', 'name', f => f.nameTable, (field, val) => val != null ? String(val) : '', addedNameIds);
   html += buildCompareTable('OS/2 table', 'OS/2', f => f.os2Table, formatOS2Value);
+  html += renderSTAT();
+  html += renderAvar();
   wrap.innerHTML = html;
 }
 
@@ -1019,6 +1364,17 @@ function serializeNameForFont(f, changes) {
       newRecs.push({ ...rec, string: ch.new_value });
     } else {
       newRecs.push(rec);
+    }
+  }
+
+  // Add records for new name IDs (not in origRecords)
+  const existingIds = new Set(origRecords.map(r => r.nameID));
+  for (const [nameID, ch] of nameChanges) {
+    if (!existingIds.has(nameID) && ch.action !== 'delete' && ch.new_value.trim() !== '') {
+      newRecs.push({
+        platformID: 3, encodingID: 1, languageID: 0x0409,
+        nameID: nameID, string: ch.new_value,
+      });
     }
   }
 
