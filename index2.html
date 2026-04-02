@@ -740,6 +740,11 @@ function startEdit(td, fontIdx, tableName, field) {
     }
     if (pendingChanges.has(key)) td.classList.add('edited');
     updateChangesCount();
+
+    // Auto-propagate fontRevision to name ID 5 (Version String) and ID 3 (Unique ID)
+    if (tableName === 'head' && field === 'fontRevision' && newVal !== origDisplay) {
+      propagateFontRevisionToName(fontIdx, newVal);
+    }
   };
 
   textarea.addEventListener('blur', finish);
@@ -750,6 +755,48 @@ function startEdit(td, fontIdx, tableName, field) {
     }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); textarea.blur(); }
   });
+}
+
+function propagateFontRevisionToName(fontIdx, rawRevision) {
+  const ver = parseFloat(rawRevision);
+  if (isNaN(ver)) return;
+  const verStr = ver.toFixed(3);
+  const fileName = fonts[fontIdx].fileName;
+
+  // ID 5 — Version String: replace with "Version x.xxx"
+  const key5 = fileName + '|name|5';
+  const orig5 = getOriginalDisplayValue(fontIdx, 'name', '5');
+  const newVal5 = 'Version ' + verStr;
+  if (newVal5 !== orig5) {
+    pendingChanges.set(key5, {
+      file: fileName, table: 'name', field: '5',
+      old_value: orig5, new_value: newVal5,
+    });
+  } else {
+    pendingChanges.delete(key5);
+  }
+
+  // ID 3 — Unique ID: replace existing version number or prepend
+  const key3 = fileName + '|name|3';
+  const orig3 = getOriginalDisplayValue(fontIdx, 'name', '3');
+  const current3 = pendingChanges.has(key3) ? pendingChanges.get(key3).new_value : orig3;
+  let newVal3;
+  if (/\d+\.\d+/.test(current3)) {
+    newVal3 = current3.replace(/\d+\.\d+/, verStr);
+  } else {
+    newVal3 = verStr + ';' + current3;
+  }
+  if (newVal3 !== orig3) {
+    pendingChanges.set(key3, {
+      file: fileName, table: 'name', field: '3',
+      old_value: orig3, new_value: newVal3,
+    });
+  } else {
+    pendingChanges.delete(key3);
+  }
+
+  updateChangesCount();
+  renderTables();
 }
 
 function getOriginalDisplayValue(fontIdx, tableName, field) {
@@ -827,6 +874,9 @@ function renderTableDirectory() {
   let html = `<div class="section-header" onclick="toggleSection(this)">
     <span class="arrow">\u25bc</span> Table Directory
   </div><div class="section-body">
+  <div style="font-size:11px; color:var(--text-dim); margin-bottom:8px; padding:0 2px;">
+    Check <b style="color:var(--red)">Del</b> to mark tables for removal from the font binary. Checked tables will be deleted when you download modified fonts.
+  </div>
   <table class="compare"><thead><tr>
     <th class="del-col">Del</th><th style="width:80px">Tag</th>`;
   fonts.forEach(f => {
