@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OT Tables Compare & Patch</title>
 <script src="https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 :root {
   --bg: #1a1a1e;
@@ -1494,7 +1495,9 @@ function rebuildFont(fontIdx) {
 }
 
 function downloadModifiedFonts() {
+  const zip = new JSZip();
   let count = 0;
+
   for (let i = 0; i < fonts.length; i++) {
     const f = fonts[i];
     if (!f.binaryData) continue;
@@ -1502,7 +1505,6 @@ function downloadModifiedFonts() {
     // Check if this font has any changes
     let hasChanges = false;
     if (deletedTables.size > 0) {
-      // Check if any deleted table actually exists in this font
       for (const tag of deletedTables) {
         if (f.binaryData.has(tag)) { hasChanges = true; break; }
       }
@@ -1520,15 +1522,24 @@ function downloadModifiedFonts() {
     const ext = f.fileName.split('.').pop();
     const stem = f.fileName.replace(/\.[^.]+$/, '');
     const outName = `${stem}.patched.${ext}`;
-
-    const blob = new Blob([buf], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = outName;
-    setTimeout(() => { a.click(); URL.revokeObjectURL(url); }, count * 300);
+    zip.file(outName, buf);
     count++;
   }
-  if (count === 0) alert('No fonts with changes to download.');
+
+  if (count === 0) { alert('No fonts with changes to download.'); return; }
+
+  const now = new Date();
+  const pad = (n, len = 2) => String(n).padStart(len, '0');
+  const ts = `${now.getFullYear()}.${pad(now.getMonth()+1)}.${pad(now.getDate())}.${pad(now.getHours())}.${pad(now.getMinutes())}.${pad(now.getSeconds())}`;
+  const zipName = `modified-fonts-${ts}.zip`;
+
+  zip.generateAsync({ type: 'blob' }).then(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = zipName;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
 }
 
 // ── Init ──
