@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Personal deploy target (see deploy.config.example)
+/deploy.config

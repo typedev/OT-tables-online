@@ -1,0 +1,5 @@
+# Personal deploy target for ./deploy.sh — copy this file to `deploy.config`
+# (git-ignored) and edit. DEPLOY_DEST is the directory `index.html` is copied
+# into; it must live inside a git repo you can push (e.g. a GitHub Pages repo).
+
+DEPLOY_DEST="/path/to/your-username.github.io/ot-edit"
