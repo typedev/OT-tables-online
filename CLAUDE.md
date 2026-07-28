@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 OT Tables Compare is a two-part tool for inspecting and patching OpenType font metadata:
 
-1. **`index.html`** — A self-contained single-page web app (no build step) that loads OTF/TTF files via drag-and-drop, displays a side-by-side comparison of `head`, `name` and `OS/2` fields (plus read-only `fvar`, `STAT` and `avar`), highlights differences, allows inline editing, can mark whole tables for deletion, and either exports a `.changes.json` patch file or rebuilds the font binaries in-browser and downloads them as a ZIP. Uses [opentype.js](https://opentype.js.org/) loaded from CDN. This file was previously called `ot-edit.html`; the earlier drafts it superseded (the original compare-only `index.html`, plus `editor.html` and `index2.html`) were removed.
+1. **`index.html`** — A self-contained single-page web app (no build step) that loads OTF/TTF files via drag-and-drop, displays a side-by-side comparison of `head`, `name` and `OS/2` fields (plus read-only `STAT` and `avar`, the latter labelled with `fvar` axis tags), highlights differences, allows inline editing, can mark whole tables for deletion, and either exports a `.changes.json` patch file or rebuilds the font binaries in-browser and downloads them as a ZIP. Uses [opentype.js](https://opentype.js.org/) loaded from CDN. This file was previously called `ot-edit.html`; the earlier drafts it superseded (the original compare-only `index.html`, plus `editor.html` and `index2.html`) were removed.
 
 2. **`apply_changes.py`** — A Python CLI script that reads the `.changes.json` and applies the edits to font binaries using fontTools. Outputs modified copies (`<name>.modified.<ext>`), leaving originals untouched.
 
