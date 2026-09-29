@@ -276,6 +276,42 @@ table.compare tbody td.val .cell-warn { color: var(--accent); cursor: help; }
 .field-popover .fp-actions .btn:disabled { opacity: 0.35; cursor: default; }
 .field-popover .fp-apply { border-color: var(--blue); color: var(--blue); }
 .field-popover .fp-hint { font-size: 10px; color: var(--text-dim); padding: 0 12px 8px; }
+.field-popover .fp-select-row {
+  display: flex; align-items: center; gap: 8px; padding: 4px 12px; font-size: 11px; color: var(--text-dim);
+}
+.field-popover .fp-select-row span { width: 60px; }
+.field-popover select {
+  flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--border-accent);
+  border-radius: 3px; padding: 3px 4px; font-family: var(--font-mono); font-size: 11px;
+}
+.field-popover.bitset-popover { width: 460px; }
+.field-popover .fp-toolbar {
+  display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border);
+}
+.field-popover .fp-search {
+  flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--border-accent);
+  border-radius: 3px; padding: 4px 8px; font-family: var(--font-mono); font-size: 11px; outline: none;
+}
+.field-popover .fp-search:focus { border-color: var(--blue); }
+.field-popover .fp-filters { display: flex; }
+.field-popover .fp-filters button {
+  font-family: var(--font-mono); font-size: 10px; padding: 3px 8px; cursor: pointer;
+  background: var(--bg); color: var(--text-dim); border: 1px solid var(--border-accent); margin-left: -1px;
+}
+.field-popover .fp-filters button:first-child { border-radius: 3px 0 0 3px; }
+.field-popover .fp-filters button:last-child { border-radius: 0 3px 3px 0; }
+.field-popover .fp-filters button.on { color: var(--accent); border-color: var(--accent-dim); position: relative; }
+.field-popover .fp-bitlist { max-height: 300px; overflow-y: auto; }
+.field-popover .fp-bitlist .fp-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.field-popover .fp-cov { font-family: var(--font-mono); min-width: 3em; text-align: right; }
+.field-popover .fp-row.cov-missing .fp-cov::before { content: '0 \26a0'; color: var(--accent); }
+.field-popover .fp-row.cov-unset .fp-cov { color: var(--accent); }
+.field-popover .fp-row.cov-unset .fp-cov::after { content: ' \26a0'; }
+.field-popover .fp-empty { padding: 8px 12px; color: var(--text-dim); font-size: 11px; }
+.field-popover .fp-raw-multi { flex-wrap: wrap; }
+.field-popover .fp-raw-multi label { display: flex; align-items: center; gap: 4px; }
+.field-popover .fp-raw-multi .fp-raw { width: 92px; }
+.field-popover .fp-summary { color: var(--text-dim); }
 </style>
 </head>
 <body>
@@ -399,6 +435,225 @@ const FIELD_SPECS = {
   'head|fontDirectionHint': { kind: 'enum', options: FONT_DIRECTION_NAMES, min: -2, max: 2,
                               recommended: { value: 2, reason: 'deprecated field, spec says set it to 2' } },
 };
+
+// OS/2 ulUnicodeRange1–4 bits: [[block name, first, last], ...]; bits 123–127 reserved
+const UNICODE_RANGE_BITS = [
+  /*0*/  [['Basic Latin', 0x0000, 0x007F]],
+  /*1*/  [['Latin-1 Supplement', 0x0080, 0x00FF]],
+  /*2*/  [['Latin Extended-A', 0x0100, 0x017F]],
+  /*3*/  [['Latin Extended-B', 0x0180, 0x024F]],
+  /*4*/  [['IPA Extensions', 0x0250, 0x02AF], ['Phonetic Extensions', 0x1D00, 0x1D7F], ['Phonetic Extensions Supplement', 0x1D80, 0x1DBF]],
+  /*5*/  [['Spacing Modifier Letters', 0x02B0, 0x02FF], ['Modifier Tone Letters', 0xA700, 0xA71F]],
+  /*6*/  [['Combining Diacritical Marks', 0x0300, 0x036F], ['Combining Diacritical Marks Supplement', 0x1DC0, 0x1DFF]],
+  /*7*/  [['Greek and Coptic', 0x0370, 0x03FF]],
+  /*8*/  [['Coptic', 0x2C80, 0x2CFF]],
+  /*9*/  [['Cyrillic', 0x0400, 0x04FF], ['Cyrillic Supplement', 0x0500, 0x052F], ['Cyrillic Extended-A', 0x2DE0, 0x2DFF], ['Cyrillic Extended-B', 0xA640, 0xA69F]],
+  /*10*/ [['Armenian', 0x0530, 0x058F]],
+  /*11*/ [['Hebrew', 0x0590, 0x05FF]],
+  /*12*/ [['Vai', 0xA500, 0xA63F]],
+  /*13*/ [['Arabic', 0x0600, 0x06FF], ['Arabic Supplement', 0x0750, 0x077F]],
+  /*14*/ [['NKo', 0x07C0, 0x07FF]],
+  /*15*/ [['Devanagari', 0x0900, 0x097F]],
+  /*16*/ [['Bengali', 0x0980, 0x09FF]],
+  /*17*/ [['Gurmukhi', 0x0A00, 0x0A7F]],
+  /*18*/ [['Gujarati', 0x0A80, 0x0AFF]],
+  /*19*/ [['Oriya', 0x0B00, 0x0B7F]],
+  /*20*/ [['Tamil', 0x0B80, 0x0BFF]],
+  /*21*/ [['Telugu', 0x0C00, 0x0C7F]],
+  /*22*/ [['Kannada', 0x0C80, 0x0CFF]],
+  /*23*/ [['Malayalam', 0x0D00, 0x0D7F]],
+  /*24*/ [['Thai', 0x0E00, 0x0E7F]],
+  /*25*/ [['Lao', 0x0E80, 0x0EFF]],
+  /*26*/ [['Georgian', 0x10A0, 0x10FF], ['Georgian Supplement', 0x2D00, 0x2D2F]],
+  /*27*/ [['Balinese', 0x1B00, 0x1B7F]],
+  /*28*/ [['Hangul Jamo', 0x1100, 0x11FF]],
+  /*29*/ [['Latin Extended Additional', 0x1E00, 0x1EFF], ['Latin Extended-C', 0x2C60, 0x2C7F], ['Latin Extended-D', 0xA720, 0xA7FF]],
+  /*30*/ [['Greek Extended', 0x1F00, 0x1FFF]],
+  /*31*/ [['General Punctuation', 0x2000, 0x206F], ['Supplemental Punctuation', 0x2E00, 0x2E7F]],
+  /*32*/ [['Superscripts And Subscripts', 0x2070, 0x209F]],
+  /*33*/ [['Currency Symbols', 0x20A0, 0x20CF]],
+  /*34*/ [['Combining Diacritical Marks For Symbols', 0x20D0, 0x20FF]],
+  /*35*/ [['Letterlike Symbols', 0x2100, 0x214F]],
+  /*36*/ [['Number Forms', 0x2150, 0x218F]],
+  /*37*/ [['Arrows', 0x2190, 0x21FF], ['Supplemental Arrows-A', 0x27F0, 0x27FF], ['Supplemental Arrows-B', 0x2900, 0x297F], ['Miscellaneous Symbols and Arrows', 0x2B00, 0x2BFF]],
+  /*38*/ [['Mathematical Operators', 0x2200, 0x22FF], ['Supplemental Mathematical Operators', 0x2A00, 0x2AFF], ['Miscellaneous Mathematical Symbols-A', 0x27C0, 0x27EF], ['Miscellaneous Mathematical Symbols-B', 0x2980, 0x29FF]],
+  /*39*/ [['Miscellaneous Technical', 0x2300, 0x23FF]],
+  /*40*/ [['Control Pictures', 0x2400, 0x243F]],
+  /*41*/ [['Optical Character Recognition', 0x2440, 0x245F]],
+  /*42*/ [['Enclosed Alphanumerics', 0x2460, 0x24FF]],
+  /*43*/ [['Box Drawing', 0x2500, 0x257F]],
+  /*44*/ [['Block Elements', 0x2580, 0x259F]],
+  /*45*/ [['Geometric Shapes', 0x25A0, 0x25FF]],
+  /*46*/ [['Miscellaneous Symbols', 0x2600, 0x26FF]],
+  /*47*/ [['Dingbats', 0x2700, 0x27BF]],
+  /*48*/ [['CJK Symbols And Punctuation', 0x3000, 0x303F]],
+  /*49*/ [['Hiragana', 0x3040, 0x309F]],
+  /*50*/ [['Katakana', 0x30A0, 0x30FF], ['Katakana Phonetic Extensions', 0x31F0, 0x31FF]],
+  /*51*/ [['Bopomofo', 0x3100, 0x312F], ['Bopomofo Extended', 0x31A0, 0x31BF]],
+  /*52*/ [['Hangul Compatibility Jamo', 0x3130, 0x318F]],
+  /*53*/ [['Phags-pa', 0xA840, 0xA87F]],
+  /*54*/ [['Enclosed CJK Letters And Months', 0x3200, 0x32FF]],
+  /*55*/ [['CJK Compatibility', 0x3300, 0x33FF]],
+  /*56*/ [['Hangul Syllables', 0xAC00, 0xD7AF]],
+  /*57*/ [['Non-Plane 0 (any character above U+FFFF)', 0x10000, 0x10FFFF]],
+  /*58*/ [['Phoenician', 0x10900, 0x1091F]],
+  /*59*/ [['CJK Unified Ideographs', 0x4E00, 0x9FFF], ['CJK Radicals Supplement', 0x2E80, 0x2EFF], ['Kangxi Radicals', 0x2F00, 0x2FDF], ['Ideographic Description Characters', 0x2FF0, 0x2FFF], ['CJK Unified Ideographs Extension A', 0x3400, 0x4DBF], ['CJK Unified Ideographs Extension B', 0x20000, 0x2A6DF], ['Kanbun', 0x3190, 0x319F]],
+  /*60*/ [['Private Use Area (plane 0)', 0xE000, 0xF8FF]],
+  /*61*/ [['CJK Strokes', 0x31C0, 0x31EF], ['CJK Compatibility Ideographs', 0xF900, 0xFAFF], ['CJK Compatibility Ideographs Supplement', 0x2F800, 0x2FA1F]],
+  /*62*/ [['Alphabetic Presentation Forms', 0xFB00, 0xFB4F]],
+  /*63*/ [['Arabic Presentation Forms-A', 0xFB50, 0xFDFF]],
+  /*64*/ [['Combining Half Marks', 0xFE20, 0xFE2F]],
+  /*65*/ [['Vertical Forms', 0xFE10, 0xFE1F], ['CJK Compatibility Forms', 0xFE30, 0xFE4F]],
+  /*66*/ [['Small Form Variants', 0xFE50, 0xFE6F]],
+  /*67*/ [['Arabic Presentation Forms-B', 0xFE70, 0xFEFF]],
+  /*68*/ [['Halfwidth And Fullwidth Forms', 0xFF00, 0xFFEF]],
+  /*69*/ [['Specials', 0xFFF0, 0xFFFF]],
+  /*70*/ [['Tibetan', 0x0F00, 0x0FFF]],
+  /*71*/ [['Syriac', 0x0700, 0x074F]],
+  /*72*/ [['Thaana', 0x0780, 0x07BF]],
+  /*73*/ [['Sinhala', 0x0D80, 0x0DFF]],
+  /*74*/ [['Myanmar', 0x1000, 0x109F]],
+  /*75*/ [['Ethiopic', 0x1200, 0x137F], ['Ethiopic Supplement', 0x1380, 0x139F], ['Ethiopic Extended', 0x2D80, 0x2DDF]],
+  /*76*/ [['Cherokee', 0x13A0, 0x13FF]],
+  /*77*/ [['Unified Canadian Aboriginal Syllabics', 0x1400, 0x167F]],
+  /*78*/ [['Ogham', 0x1680, 0x169F]],
+  /*79*/ [['Runic', 0x16A0, 0x16FF]],
+  /*80*/ [['Khmer', 0x1780, 0x17FF], ['Khmer Symbols', 0x19E0, 0x19FF]],
+  /*81*/ [['Mongolian', 0x1800, 0x18AF]],
+  /*82*/ [['Braille Patterns', 0x2800, 0x28FF]],
+  /*83*/ [['Yi Syllables', 0xA000, 0xA48F], ['Yi Radicals', 0xA490, 0xA4CF]],
+  /*84*/ [['Tagalog', 0x1700, 0x171F], ['Hanunoo', 0x1720, 0x173F], ['Buhid', 0x1740, 0x175F], ['Tagbanwa', 0x1760, 0x177F]],
+  /*85*/ [['Old Italic', 0x10300, 0x1032F]],
+  /*86*/ [['Gothic', 0x10330, 0x1034F]],
+  /*87*/ [['Deseret', 0x10400, 0x1044F]],
+  /*88*/ [['Byzantine Musical Symbols', 0x1D000, 0x1D0FF], ['Musical Symbols', 0x1D100, 0x1D1FF], ['Ancient Greek Musical Notation', 0x1D200, 0x1D24F]],
+  /*89*/ [['Mathematical Alphanumeric Symbols', 0x1D400, 0x1D7FF]],
+  /*90*/ [['Private Use (plane 15)', 0xF0000, 0xFFFFD], ['Private Use (plane 16)', 0x100000, 0x10FFFD]],
+  /*91*/ [['Variation Selectors', 0xFE00, 0xFE0F], ['Variation Selectors Supplement', 0xE0100, 0xE01EF]],
+  /*92*/ [['Tags', 0xE0000, 0xE007F]],
+  /*93*/ [['Limbu', 0x1900, 0x194F]],
+  /*94*/ [['Tai Le', 0x1950, 0x197F]],
+  /*95*/ [['New Tai Lue', 0x1980, 0x19DF]],
+  /*96*/ [['Buginese', 0x1A00, 0x1A1F]],
+  /*97*/ [['Glagolitic', 0x2C00, 0x2C5F]],
+  /*98*/ [['Tifinagh', 0x2D30, 0x2D7F]],
+  /*99*/ [['Yijing Hexagram Symbols', 0x4DC0, 0x4DFF]],
+  /*100*/[['Syloti Nagri', 0xA800, 0xA82F]],
+  /*101*/[['Linear B Syllabary', 0x10000, 0x1007F], ['Linear B Ideograms', 0x10080, 0x100FF], ['Aegean Numbers', 0x10100, 0x1013F]],
+  /*102*/[['Ancient Greek Numbers', 0x10140, 0x1018F]],
+  /*103*/[['Ugaritic', 0x10380, 0x1039F]],
+  /*104*/[['Old Persian', 0x103A0, 0x103DF]],
+  /*105*/[['Shavian', 0x10450, 0x1047F]],
+  /*106*/[['Osmanya', 0x10480, 0x104AF]],
+  /*107*/[['Cypriot Syllabary', 0x10800, 0x1083F]],
+  /*108*/[['Kharoshthi', 0x10A00, 0x10A5F]],
+  /*109*/[['Tai Xuan Jing Symbols', 0x1D300, 0x1D35F]],
+  /*110*/[['Cuneiform', 0x12000, 0x123FF], ['Cuneiform Numbers and Punctuation', 0x12400, 0x1247F]],
+  /*111*/[['Counting Rod Numerals', 0x1D360, 0x1D37F]],
+  /*112*/[['Sundanese', 0x1B80, 0x1BBF]],
+  /*113*/[['Lepcha', 0x1C00, 0x1C4F]],
+  /*114*/[['Ol Chiki', 0x1C50, 0x1C7F]],
+  /*115*/[['Saurashtra', 0xA880, 0xA8DF]],
+  /*116*/[['Kayah Li', 0xA900, 0xA92F]],
+  /*117*/[['Rejang', 0xA930, 0xA95F]],
+  /*118*/[['Cham', 0xAA00, 0xAA5F]],
+  /*119*/[['Ancient Symbols', 0x10190, 0x101CF]],
+  /*120*/[['Phaistos Disc', 0x101D0, 0x101FF]],
+  /*121*/[['Carian', 0x102A0, 0x102DF], ['Lycian', 0x10280, 0x1029F], ['Lydian', 0x10920, 0x1093F]],
+  /*122*/[['Domino Tiles', 0x1F030, 0x1F09F], ['Mahjong Tiles', 0x1F000, 0x1F02F]],
+];
+const NON_PLANE_0_BIT = 57;
+
+// OS/2 ulCodePageRange1–2 bits
+const CODEPAGE_BITS = {
+  0:'1252 Latin 1', 1:'1250 Latin 2: Eastern Europe', 2:'1251 Cyrillic', 3:'1253 Greek',
+  4:'1254 Turkish', 5:'1255 Hebrew', 6:'1256 Arabic', 7:'1257 Windows Baltic', 8:'1258 Vietnamese',
+  16:'874 Thai', 17:'932 JIS / Japan', 18:'936 Chinese: Simplified (PRC, Singapore)',
+  19:'949 Korean Wansung', 20:'950 Chinese: Traditional (Taiwan, Hong Kong)', 21:'1361 Korean Johab',
+  29:'Macintosh Character Set (US Roman)', 30:'OEM Character Set', 31:'Symbol Character Set',
+  48:'869 IBM Greek', 49:'866 MS-DOS Russian', 50:'865 MS-DOS Nordic', 51:'864 Arabic',
+  52:'863 MS-DOS Canadian French', 53:'862 Hebrew', 54:'861 MS-DOS Icelandic',
+  55:'860 MS-DOS Portuguese', 56:'857 IBM Turkish', 57:'855 IBM Cyrillic; primarily Russian',
+  58:'852 Latin 2', 59:'775 MS-DOS Baltic', 60:'737 Greek; former 437 G',
+  61:'708 Arabic; ASMO 708', 62:'850 WE / Latin 1', 63:'437 US',
+};
+
+// sFamilyClass: high byte = class, low byte = subclass (IBM font classification)
+const FAMILY_CLASSES = {
+  0: ['No Classification', {}],
+  1: ['Oldstyle Serifs', {1:'IBM Rounded Legibility', 2:'Garalde', 3:'Venetian', 4:'Modified Venetian',
+      5:'Dutch Modern', 6:'Dutch Traditional', 7:'Contemporary', 8:'Calligraphic'}],
+  2: ['Transitional Serifs', {1:'Direct Line', 2:'Script'}],
+  3: ['Modern Serifs', {1:'Italian', 2:'Script'}],
+  4: ['Clarendon Serifs', {1:'Clarendon', 2:'Modern', 3:'Traditional', 4:'Newspaper', 5:'Stub Serif',
+      6:'Monotone', 7:'Typewriter'}],
+  5: ['Slab Serifs', {1:'Monotone', 2:'Humanist', 3:'Geometric', 4:'Swiss', 5:'Typewriter'}],
+  7: ['Freeform Serifs', {1:'Modern'}],
+  8: ['Sans Serif', {1:'IBM Neo-grotesque Gothic', 2:'Humanist', 3:'Low-x Round Geometric',
+      4:'High-x Round Geometric', 5:'Neo-grotesque Gothic', 6:'Modified Neo-grotesque Gothic',
+      9:'Typewriter Gothic', 10:'Matrix'}],
+  9: ['Ornamentals', {1:'Engraver', 2:'Black Letter', 3:'Decorative', 4:'Three Dimensional'}],
+  10: ['Scripts', {1:'Uncial', 2:'Brush Joined', 3:'Formal Joined', 4:'Monotone Joined', 5:'Calligraphic',
+       6:'Brush Unjoined', 7:'Formal Unjoined', 8:'Monotone Unjoined'}],
+  12: ['Symbolic', {3:'Mixed Serif', 6:'Oldstyle Serif', 7:'Neo-grotesque Sans Serif'}],
+};
+// Every class except 0 also has 0 = No Classification and 15 = Miscellaneous
+function familySubclasses(cls) {
+  const c = FAMILY_CLASSES[cls];
+  if (!c) return {};
+  return cls === 0 ? {0: 'No Classification'} : {0: 'No Classification', ...c[1], 15: 'Miscellaneous'};
+}
+function describeFamilyClass(val) {
+  const cls = (val >> 8) & 0xFF, sub = val & 0xFF;
+  const c = FAMILY_CLASSES[cls];
+  if (!c) return `class ${cls} (reserved), subclass ${sub}`;
+  if (cls === 0 && sub === 0) return c[0];
+  const sn = familySubclasses(cls)[sub];
+  return `${c[0]} / ${sn != null ? sn : 'subclass ' + sub}`;
+}
+
+// Range bitsets spanning several uint32 fields; bit b lives in fields[b >> 5]
+const UNICODE_RANGE_SPEC = {
+  kind: 'bitset', label: 'Unicode ranges', coverage: true,
+  fields: ['ulUnicodeRange1', 'ulUnicodeRange2', 'ulUnicodeRange3', 'ulUnicodeRange4'],
+  bitName: b => UNICODE_RANGE_BITS[b] ? UNICODE_RANGE_BITS[b].map(r => r[0]).join('; ') : null,
+};
+const CODEPAGE_RANGE_SPEC = {
+  kind: 'bitset', label: 'Code page ranges',
+  fields: ['ulCodePageRange1', 'ulCodePageRange2'],
+  bitName: b => CODEPAGE_BITS[b] || null,
+};
+for (const spec of [UNICODE_RANGE_SPEC, CODEPAGE_RANGE_SPEC])
+  for (const fl of spec.fields) FIELD_SPECS['OS/2|' + fl] = spec;
+FIELD_SPECS['OS/2|sFamilyClass'] = { kind: 'familyClass' };
+
+// Flat [first, last, bit] list sorted by first, for codepoint lookup
+const UNICODE_RANGE_LIST = UNICODE_RANGE_BITS
+  .flatMap((blocks, bit) => bit === NON_PLANE_0_BIT ? [] : blocks.map(r => [r[1], r[2], bit]))
+  .sort((a, b) => a[0] - b[0]);
+function unicodeRangeBitOf(cp) {
+  let lo = 0, hi = UNICODE_RANGE_LIST.length - 1;
+  while (lo <= hi) {
+    const m = (lo + hi) >> 1, r = UNICODE_RANGE_LIST[m];
+    if (cp < r[0]) hi = m - 1; else if (cp > r[1]) lo = m + 1; else return r[2];
+  }
+  return -1;
+}
+// Characters per Unicode range bit in the font's cmap (cached), or null without cmap
+function getUnicodeCoverage(fontIdx) {
+  const f = fonts[fontIdx];
+  if (f.unicodeCoverage !== undefined) return f.unicodeCoverage;
+  const map = f.font.tables.cmap && f.font.tables.cmap.glyphIndexMap;
+  if (!map) return (f.unicodeCoverage = null);
+  const cov = new Array(128).fill(0);
+  for (const key of Object.keys(map)) {
+    const cp = +key;
+    const bit = unicodeRangeBitOf(cp);
+    if (bit >= 0) cov[bit]++;
+    if (cp > 0xFFFF) cov[NON_PLANE_0_BIT]++;
+  }
+  return (f.unicodeCoverage = cov);
+}
 
 // fsSelection ITALIC / BOLD must agree with head.macStyle Italic / Bold
 const STYLE_LINKS = [{name: 'Italic', fs: 0, mac: 1}, {name: 'Bold', fs: 5, mac: 0}];
@@ -931,7 +1186,7 @@ function formatOS2Value(field, val) {
     case 'panose': return formatPanose(val);
     case 'ulUnicodeRange1': case 'ulUnicodeRange2': case 'ulUnicodeRange3': case 'ulUnicodeRange4':
     case 'ulCodePageRange1': case 'ulCodePageRange2': return hex32(val);
-    case 'sFamilyClass': return `${val} (class ${(val >> 8) & 0xFF}, subclass ${val & 0xFF})`;
+    case 'sFamilyClass': return `${val} (${describeFamilyClass(val)})`;
     default: return String(val);
   }
 }
@@ -1101,7 +1356,11 @@ function startEdit(td, fontIdx, tableName, field) {
   if (td.classList.contains('editing')) return;
   if (isReadonlyField(tableName, field)) return;
   const spec = FIELD_SPECS[tableName + '|' + field];
-  if (spec) { openFieldPopover(td, fontIdx, tableName, field, spec); return; }
+  if (spec) {
+    if (spec.kind === 'bitset') openBitsetPopover(td, fontIdx, tableName, field, spec);
+    else openFieldPopover(td, fontIdx, tableName, field, spec);
+    return;
+  }
 
   td.classList.add('editing');
   const textarea = document.createElement('textarea');
@@ -1189,6 +1448,36 @@ function getFieldWarnings(fontIdx, tableName, field, val, opts = {}) {
   const f = fonts[fontIdx];
   const os2Version = f.os2Table ? f.os2Table.version : null;
   const clearBit = bit => ({ label: 'Clear', apply: v => v & ~(1 << bit) });
+  const listNames = a => a.slice(0, 5).join(', ') + (a.length > 5 ? ` +${a.length - 5} more` : '');
+  if (spec.kind === 'bitset') {
+    const base = spec.fields.indexOf(field) * 32;
+    const reserved = [];
+    for (let k = 0; k < 32; k++)
+      if (((val >>> k) & 1) && !spec.bitName(base + k)) reserved.push(base + k);
+    if (reserved.length) w.push({ msg: `Reserved bit${reserved.length > 1 ? 's' : ''} ${reserved.join(', ')} set (should be 0)` });
+    const cov = spec.coverage ? getUnicodeCoverage(fontIdx) : null;
+    if (cov) {
+      const setEmpty = [], unset = [];
+      for (let k = 0; k < 32; k++) {
+        const b = base + k;
+        if (!UNICODE_RANGE_BITS[b]) continue;
+        const name = UNICODE_RANGE_BITS[b][0][0];
+        if (((val >>> k) & 1) && !cov[b]) setEmpty.push(name);
+        else if (!((val >>> k) & 1) && cov[b]) unset.push(`${name} (${cov[b]})`);
+      }
+      if (setEmpty.length) w.push({ msg: `Set, but no characters in cmap: ${listNames(setEmpty)}` });
+      if (unset.length) w.push({ msg: `Characters in cmap, but not set: ${listNames(unset)}` });
+    }
+    return w;
+  }
+  if (spec.kind === 'familyClass') {
+    const cls = (val >> 8) & 0xFF, sub = val & 0xFF;
+    if (!FAMILY_CLASSES[cls]) w.push({ msg: `Class ${cls} is reserved` });
+    else if (familySubclasses(cls)[sub] == null)
+      w.push({ msg: `Subclass ${sub} is not defined for ${FAMILY_CLASSES[cls][0]}`,
+               fix: { label: 'Set subclass 0', apply: v => v & 0xFF00 } });
+    return w;
+  }
   if (spec.kind === 'bitfield') {
     if (spec.group && spec.group.options[val & spec.group.mask] == null)
       w.push({ msg: `${spec.group.label}: only one of bits 1\u20133 may be set` });
@@ -1229,7 +1518,6 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
   let val = startVal;
   const otherFonts = fonts.map((_, i) => i).filter(i => fieldExists(i, tableName, field));
 
-  td.classList.add('editing');
   const pop = document.createElement('div');
   pop.className = 'field-popover';
   pop.innerHTML = `
@@ -1302,6 +1590,17 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
           <span class="fp-bit">${bit}</span><span class="fp-name">${named ? spec.bits[bit] : 'bit ' + bit}</span>
           <span class="fp-note">${note}</span></label>`;
       }
+    } else if (spec.kind === 'familyClass') {
+      const cls = (val >> 8) & 0xFF, sub = val & 0xFF;
+      const opts = (entries, cur) => {
+        const known = entries.some(([k]) => +k === cur);
+        return (known ? '' : `<option value="${cur}">${cur} \u2014 undefined</option>`)
+          + entries.map(([k, n]) => `<option value="${k}">${k} \u2014 ${escHtml(n)}</option>`).join('');
+      };
+      html += `<label class="fp-select-row"><span>Class</span><select class="fp-class">${
+        opts(Object.entries(FAMILY_CLASSES).map(([k, c]) => [k, c[0]]), cls)}</select></label>`;
+      html += `<label class="fp-select-row"><span>Subclass</span><select class="fp-subclass">${
+        opts(Object.entries(familySubclasses(cls)), sub)}</select></label>`;
     } else {
       for (const [ov, name] of Object.entries(spec.options).sort((a, b) => a[0] - b[0]))
         html += `<label class="fp-row"><input type="radio" name="fp-enum" value="${ov}">
@@ -1332,6 +1631,9 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
     if (spec.kind === 'bitfield') {
       body.querySelectorAll('input[data-bit]').forEach(cb => { cb.checked = !!(val & (1 << +cb.dataset.bit)); });
       body.querySelectorAll('input[name="fp-group"]').forEach(r => { r.checked = (val & spec.group.mask) === +r.value; });
+    } else if (spec.kind === 'familyClass') {
+      body.querySelector('.fp-class').value = String((val >> 8) & 0xFF);
+      body.querySelector('.fp-subclass').value = String(val & 0xFF);
     } else {
       body.querySelectorAll('input[name="fp-enum"]').forEach(r => { r.checked = val === +r.value; });
     }
@@ -1362,6 +1664,9 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
     if (t.dataset.bit != null) val = t.checked ? (val | (1 << +t.dataset.bit)) : (val & ~(1 << +t.dataset.bit));
     else if (t.name === 'fp-group') val = (val & ~spec.group.mask) | +t.value;
     else if (t.name === 'fp-enum') val = +t.value;
+    // A new class has its own subclasses: start from 0 = No Classification
+    else if (t.classList.contains('fp-class')) { val = +t.value << 8; renderBody(); }
+    else if (t.classList.contains('fp-subclass')) val = (val & 0xFF00) | +t.value;
     sync(false);
   });
   warnEl.addEventListener('click', e => {
@@ -1411,7 +1716,22 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
     }
   });
 
-  // ─ placement & lifecycle ─
+  const place = mountPopover(td, pop, {
+    // Apply on outside click, like the textarea commits on blur
+    isDirty: () => !rawError && (val !== getCurrentIntValue(fontIdx, tableName, field)
+      || (syncLink() && val !== startVal)),
+    apply: applyHere,
+  });
+  renderBody();
+  sync(false);
+  place();
+  (body.querySelector('input:checked, select') || body.querySelector('input') || raw).focus();
+}
+
+// Shows pop next to td and makes it the active popover. isDirty() decides
+// whether an outside click applies; apply() records the edit (no re-render).
+function mountPopover(td, pop, { isDirty, apply }) {
+  td.classList.add('editing');
   document.body.appendChild(pop);
   const place = () => {
     const r = td.getBoundingClientRect();
@@ -1422,20 +1742,13 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
     pop.style.left = Math.max(8, left) + 'px';
     pop.style.top = Math.max(8, top) + 'px';
   };
-  const onOutside = e => {
-    if (pop.contains(e.target)) return;
-    // Apply on outside click, like the textarea commits on blur
-    const changed = !rawError && (val !== getCurrentIntValue(fontIdx, tableName, field)
-      || (syncLink() && val !== startVal));
-    closeFieldPopover(changed);
-  };
+  const onOutside = e => { if (!pop.contains(e.target)) closeFieldPopover(isDirty()); };
   const onScroll = e => { if (!pop.contains(e.target)) place(); };
   document.addEventListener('mousedown', onOutside);
   window.addEventListener('scroll', onScroll, true);
   window.addEventListener('resize', place);
-
   activePopover = {
-    apply: () => { applyHere(); renderTables(); },
+    apply: () => { apply(); renderTables(); },
     cleanup: () => {
       document.removeEventListener('mousedown', onOutside);
       window.removeEventListener('scroll', onScroll, true);
@@ -1444,11 +1757,195 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
       td.classList.remove('editing');
     },
   };
+  return place;
+}
 
-  renderBody();
-  sync(false);
+// ── Popover for bitsets spread over several uint32 fields (Unicode / code page ranges) ──
+
+function openBitsetPopover(td, fontIdx, tableName, field, spec) {
+  closeFieldPopover(false);
+  const f = fonts[fontIdx];
+  const nBits = spec.fields.length * 32;
+  const readVals = i => spec.fields.map(fl => (getCurrentIntValue(i, tableName, fl) ?? 0) >>> 0);
+  const origVals = spec.fields.map(fl => (parseIntInput(getOriginalDisplayValue(fontIdx, tableName, fl)) || 0) >>> 0);
+  const startVals = readVals(fontIdx);
+  let vals = startVals.slice();
+  const isSet = (v, b) => ((v[b >> 5] >>> (b & 31)) & 1) === 1;
+  const withBit = (v, b, on) => v.map((x, k) => k !== b >> 5 ? x
+    : (on ? (x | (1 << (b & 31))) : (x & ~(1 << (b & 31)))) >>> 0);
+  const coverage = spec.coverage ? getUnicodeCoverage(fontIdx) : null;
+  const otherFonts = fonts.map((_, i) => i).filter(i => fieldExists(i, tableName, spec.fields[0]));
+  // Bits from cmap: a range is set when the font has at least one character in it
+  const fromCmap = cov => spec.fields.map((_, k) => {
+    let x = 0;
+    for (let j = 0; j < 32; j++) if (cov[k * 32 + j] && UNICODE_RANGE_BITS[k * 32 + j]) x |= 1 << j;
+    return x >>> 0;
+  });
+  let filter = 'all', query = '';
+
+  const pop = document.createElement('div');
+  pop.className = 'field-popover bitset-popover';
+  pop.innerHTML = `
+    <div class="fp-head">
+      <span class="fp-field">${tableName}.${escHtml(spec.label)}</span>
+      <span class="fp-file" title="${escHtml(f.fileName)}">${escHtml(f.fileName)}</span>
+    </div>
+    <div class="fp-toolbar">
+      <input class="fp-search" placeholder="${coverage ? 'Search name, bit or U+0410' : 'Search name or bit'}" spellcheck="false">
+      <div class="fp-filters">
+        <button data-filter="all" class="on">All</button>
+        <button data-filter="set">Set</button>
+        ${coverage ? '<button data-filter="mismatch" title="Differs from what cmap covers">≠ cmap</button>' : ''}
+      </div>
+    </div>
+    <div class="fp-body fp-bitlist"></div>
+    <div class="fp-raw-row fp-raw-multi">${spec.fields.map((fl, k) =>
+      `<label title="${fl}">${k + 1}<input class="fp-raw" data-k="${k}" spellcheck="false"></label>`).join('')}
+    </div>
+    <div class="fp-warnings"></div>
+    <div class="fp-actions">
+      <button class="btn fp-apply">Apply</button>
+      ${otherFonts.length > 1 ? `<button class="btn fp-apply-all" title="Sets / clears only the bits you changed; other bits keep each font’s own value">Apply to all ${otherFonts.length} fonts</button>
+        <button class="btn fp-copy-all" title="Overwrite all ${spec.fields.length} fields in every font">Copy value to all</button>` : ''}
+      ${coverage ? `<button class="btn fp-cmap" title="Set exactly the ranges that have characters in this font's cmap">From cmap</button>` : ''}
+      ${coverage && otherFonts.length > 1 ? `<button class="btn fp-cmap-all" title="Recalculate from each font's own cmap and apply">From cmap → all fonts</button>` : ''}
+      <button class="btn fp-reset" title="Back to the values in the original file">Reset</button>
+    </div>
+    <div class="fp-hint">Enter / click outside — apply · Esc — cancel</div>`;
+  const list = pop.querySelector('.fp-bitlist');
+  const warnEl = pop.querySelector('.fp-warnings');
+  const raws = [...pop.querySelectorAll('.fp-raw')];
+  const rawErrors = spec.fields.map(() => null);
+  const hasError = () => rawErrors.some(Boolean);
+
+  const cpQuery = q => {
+    const m = /^(?:u\+|0x)?([0-9a-f]{4,6})$/i.exec(q);
+    return m ? parseInt(m[1], 16) : null;
+  };
+  const rowMatches = (b, name) => {
+    if (filter === 'set' && !isSet(vals, b)) return false;
+    if (filter === 'mismatch' && (isSet(vals, b) === !!coverage[b] || !name)) return false;
+    if (!query) return true;
+    if (String(b) === query) return true;
+    if (name && name.toLowerCase().includes(query.toLowerCase())) return true;
+    const cp = coverage && cpQuery(query);
+    return cp != null && UNICODE_RANGE_BITS[b] && UNICODE_RANGE_BITS[b].some(r => cp >= r[1] && cp <= r[2]);
+  };
+  const renderList = () => {
+    let html = '';
+    for (let b = 0; b < nBits; b++) {
+      const name = spec.bitName(b);
+      // Reserved bits are listed only when set, so they can be cleared
+      if (!name && !isSet(vals, b) && !isSet(origVals, b)) continue;
+      if (!rowMatches(b, name)) continue;
+      const cov = coverage && name ? coverage[b] : null;
+      html += `<label class="fp-row${name ? '' : ' reserved'}" data-row="${b}"><input type="checkbox" data-bit="${b}">
+        <span class="fp-bit">${b}</span><span class="fp-name" title="${escHtml(name || 'reserved')}">${escHtml(name || 'reserved')}</span>
+        ${cov != null ? `<span class="fp-note fp-cov">${cov || ''}</span>` : ''}</label>`;
+    }
+    list.innerHTML = html || '<div class="fp-empty">Nothing found</div>';
+    syncList();
+  };
+  const syncList = () => {
+    list.querySelectorAll('.fp-row').forEach(row => {
+      const b = +row.dataset.row, on = isSet(vals, b);
+      row.querySelector('input').checked = on;
+      if (coverage && spec.bitName(b)) {
+        row.classList.toggle('cov-missing', on && !coverage[b]);
+        row.classList.toggle('cov-unset', !on && !!coverage[b]);
+      }
+    });
+  };
+  const sync = (fromRawK) => {
+    raws.forEach((r, k) => {
+      if (k !== fromRawK) { r.value = hex32(vals[k]); rawErrors[k] = null; }
+      r.classList.toggle('invalid', !!rawErrors[k]);
+    });
+    syncList();
+    let html = '';
+    const err = rawErrors.find(Boolean);
+    if (err) html = `<div>⚠ ${escHtml(err)}</div>`;
+    else {
+      const w = spec.fields.flatMap((fl, k) => getFieldWarnings(fontIdx, tableName, fl, vals[k]));
+      html = w.map(x => `<div>⚠ ${escHtml(x.msg)}</div>`).join('');
+      const n = vals.reduce((a, x) => { for (; x; x &= x - 1) a++; return a; }, 0);
+      html += `<div class="fp-summary">${n} bit${n !== 1 ? 's' : ''} set</div>`;
+    }
+    warnEl.innerHTML = html;
+    warnEl.classList.toggle('error', !!err);
+    pop.querySelectorAll('.fp-apply, .fp-apply-all, .fp-copy-all').forEach(b => { b.disabled = hasError(); });
+  };
+
+  list.addEventListener('change', e => {
+    const t = e.target;
+    if (t.dataset.bit == null) return;
+    vals = withBit(vals, +t.dataset.bit, t.checked);
+    sync();
+  });
+  raws.forEach((r, k) => r.addEventListener('input', () => {
+    const v = parseIntInput(r.value);
+    if (isNaN(v)) rawErrors[k] = `${spec.fields[k]}: not an integer (decimal or 0x-hex)`;
+    else if (v < 0 || v > 0xFFFFFFFF) rawErrors[k] = `${spec.fields[k]}: out of uint32 range`;
+    else { rawErrors[k] = null; vals = vals.map((x, j) => j === k ? v >>> 0 : x); renderList(); }
+    sync(k);
+  }));
+  pop.querySelector('.fp-search').addEventListener('input', e => { query = e.target.value.trim(); renderList(); });
+  pop.querySelector('.fp-filters').addEventListener('click', e => {
+    if (!e.target.dataset.filter) return;
+    filter = e.target.dataset.filter;
+    pop.querySelectorAll('.fp-filters button').forEach(b => b.classList.toggle('on', b === e.target));
+    renderList();
+  });
+
+  // ─ apply ─
+  const refresh = () => { closeFieldPopover(false); renderTables(); };
+  const applyTo = (i, v) => spec.fields.forEach((fl, k) => setFieldValue(i, tableName, fl, formatOS2Value(fl, v[k])));
+  const applyHere = () => { if (!hasError()) applyTo(fontIdx, vals); };
+  const applyAll = exact => {
+    if (hasError()) return;
+    for (const i of otherFonts) {
+      if (exact || i === fontIdx) { applyTo(i, vals); continue; }
+      const cur = readVals(i);
+      applyTo(i, cur.map((x, k) => {
+        const changed = (startVals[k] ^ vals[k]) >>> 0;
+        return ((x & ~changed) | (vals[k] & changed)) >>> 0;
+      }));
+    }
+    refresh();
+  };
+  pop.querySelector('.fp-apply').onclick = () => { applyHere(); refresh(); };
+  const on = (sel, fn) => { const el = pop.querySelector(sel); if (el) el.onclick = fn; };
+  on('.fp-apply-all', () => applyAll(false));
+  on('.fp-copy-all', () => applyAll(true));
+  on('.fp-cmap', () => { vals = fromCmap(coverage); renderList(); sync(); });
+  on('.fp-cmap-all', () => {
+    for (const i of otherFonts) {
+      const cov = getUnicodeCoverage(i);
+      if (cov) applyTo(i, fromCmap(cov));
+    }
+    refresh();
+  });
+  on('.fp-reset', () => { vals = origVals.slice(); renderList(); sync(); });
+  pop.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.preventDefault(); closeFieldPopover(false); }
+    else if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
+      e.preventDefault();
+      if (!hasError()) { applyHere(); refresh(); }
+    }
+  });
+
+  const place = mountPopover(td, pop, {
+    isDirty: () => !hasError() && vals.some((x, k) => x !== startVals[k]),
+    apply: applyHere,
+  });
+  renderList();
+  sync();
   place();
-  (body.querySelector('input:checked') || body.querySelector('input') || raw).focus();
+  // Start at the range of the clicked field
+  const firstRow = list.querySelector(`[data-row="${spec.fields.indexOf(field) * 32}"]`)
+    || [...list.querySelectorAll('.fp-row')].find(r => +r.dataset.row >= spec.fields.indexOf(field) * 32);
+  if (firstRow) list.scrollTop = firstRow.offsetTop - list.offsetTop;
+  pop.querySelector('.fp-search').focus();
 }
 
 function propagateFontRevisionToName(fontIdx, rawRevision) {
