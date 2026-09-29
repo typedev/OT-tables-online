@@ -269,6 +269,8 @@ table.compare tbody td.val .cell-error:empty { display: none; }
 .field-popover .fp-link[hidden] { display: none; }
 .field-popover .fp-link input { accent-color: var(--blue); margin: 0; }
 table.compare tbody td.val .cell-warn { color: var(--accent); cursor: help; }
+table.compare tbody td.val .cell-info { color: var(--text-dim); cursor: help; }
+.field-popover .fp-warnings .info { color: var(--text-dim); }
 .field-popover .fp-actions {
   display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border);
 }
@@ -392,13 +394,14 @@ const HEAD_FIELDS = [
   'fontDirectionHint','indexToLocFormat','glyphDataFormat',
 ];
 
-const WEIGHT_NAMES = {100:'Thin',200:'ExtraLight',250:'ExtraLight',300:'Light',350:'SemiLight',400:'Regular',500:'Medium',600:'SemiBold',700:'Bold',800:'ExtraBold',900:'Black',950:'ExtraBlack'};
+// Commonly used values listed in the spec; any value 1–1000 is valid
+const WEIGHT_NAMES = {100:'Thin',200:'ExtraLight',300:'Light',400:'Regular',500:'Medium',600:'SemiBold',700:'Bold',800:'ExtraBold',900:'Black'};
 const WIDTH_NAMES = {1:'Ultra-condensed',2:'Extra-condensed',3:'Condensed',4:'Semi-condensed',5:'Normal',6:'Semi-expanded',7:'Expanded',8:'Extra-expanded',9:'Ultra-expanded'};
 // fsType bits 0–3 are a single usage-permission value, not independent flags
 const FSTYPE_USAGE = {0:'Installable',2:'Restricted License',4:'Preview & Print',8:'Editable'};
 const FSTYPE_BITS = {8:'No Subsetting',9:'Bitmap Only'};
 const FSSELECTION_BITS = {0:'ITALIC',1:'UNDERSCORE',2:'NEGATIVE',3:'OUTLINED',4:'STRIKEOUT',5:'BOLD',6:'REGULAR',7:'USE_TYPO_METRICS',8:'WWS',9:'OBLIQUE'};
-const HEAD_FLAGS_BITS = {0:'Y0_IS_BASELINE',1:'X_LSB_IS_AT_0',2:'SCALED_POINT_SIZE_DIFFERS',3:'USE_INTEGER_SCALING',4:'INSTRUCTIONS_ALTER_ADVANCE',5:'VERTICAL_LAYOUT',11:'LOSSLESS_COMPRESSION',12:'CONVERTED_FONT',13:'CLEARTYPE_OPTIMIZED',14:'LAST_RESORT_FONT'};
+const HEAD_FLAGS_BITS = {0:'Y0_IS_BASELINE',1:'X_LSB_IS_AT_0',2:'INSTRUCTIONS_DEPEND_ON_POINT_SIZE',3:'FORCE_PPEM_TO_INTEGER',4:'INSTRUCTIONS_ALTER_ADVANCE',5:'VERTICAL_LAYOUT',11:'LOSSLESS_COMPRESSION',12:'CONVERTED_FONT',13:'CLEARTYPE_OPTIMIZED',14:'LAST_RESORT_FONT'};
 const MACSTYLE_BITS = {0:'Bold',1:'Italic',2:'Underline',3:'Outline',4:'Shadow',5:'Condensed',6:'Extended'};
 const FONT_DIRECTION_NAMES = {'-2':'Right-to-left + neutrals','-1':'Right-to-left only',0:'Mixed',1:'Left-to-right only',2:'Left-to-right + neutrals'};
 
@@ -406,7 +409,9 @@ const FONT_DIRECTION_NAMES = {'-2':'Right-to-left + neutrals','-1':'Right-to-lef
 // Keyed by "table|field".
 //   bitfield: bits {bit: name}, notes {bit: hint}, minVersion {bit: OS/2 version},
 //             conflicts [[a, b], ...] (bits that must not be set together),
+//             shouldBeClear {bit: reason} (named bits the spec says not to set),
 //             group {mask, label, options} (bits under mask form one enum value)
+//   check:    (fontIdx, val) -> [warnings] for rules involving other tables
 //   enum:     options {value: name}, min/max (valid range), free (any value in range is fine),
 //             recommended {value, reason}
 //   link:     {table, field, label, mismatch(val, other) -> [names], derive(val, other) -> other}
@@ -414,17 +419,35 @@ const FONT_DIRECTION_NAMES = {'-2':'Right-to-left + neutrals','-1':'Right-to-lef
 const FIELD_SPECS = {
   'OS/2|fsSelection': {
     kind: 'bitfield', bits: FSSELECTION_BITS,
-    notes: {1:'legacy', 2:'legacy', 3:'legacy', 4:'legacy', 6:'exclusive with ITALIC / BOLD'},
+    notes: {1:'rarely used', 2:'rarely used', 3:'rarely used', 4:'rarely used', 6:'must be clear if ITALIC / BOLD'},
     minVersion: {7:4, 8:4, 9:4},
     conflicts: [[6, 0], [6, 5]],
+    // With WWS set, name IDs 21 and 22 "are never required and should not be included"
+    check: (fontIdx, val) => {
+      if (!(val & 0x100)) return [];
+      const ids = [21, 22].filter(id => getCurrentDisplayValue(fontIdx, 'name', String(id)).trim() !== '');
+      return ids.length ? [{ msg: `WWS is set, but name ID${ids.length > 1 ? 's' : ''} ${ids.join(' and ')} ${ids.length > 1 ? 'are' : 'is'} present (should not be included)` }] : [];
+    },
     link: { table: 'head', field: 'macStyle', label: 'Bold / Italic',
             mismatch: (v, o) => styleMismatches(v, o), derive: macStyleFromFsSelection },
   },
   'OS/2|fsType': {
     kind: 'bitfield', bits: FSTYPE_BITS,
     group: {mask: 0x000F, label: 'Usage permissions', options: FSTYPE_USAGE},
+    minVersion: {8:2, 9:2},
   },
-  'head|flags':    { kind: 'bitfield', bits: HEAD_FLAGS_BITS },
+  'head|flags': {
+    kind: 'bitfield', bits: HEAD_FLAGS_BITS,
+    notes: {3:'recommended for hinted fonts', 5:'not used in OpenType'},
+    shouldBeClear: {5: 'not used in OpenType and should not be set'},
+    // Variable fonts with TrueType outlines must have bit 1 set
+    check: (fontIdx, val) => {
+      const d = fonts[fontIdx].binaryData;
+      return d && d.has('fvar') && d.has('glyf') && !(val & 0x2)
+        ? [{ msg: 'Variable TrueType font: X_LSB_IS_AT_0 (bit 1) must be set',
+             fix: { label: 'Set bit 1', apply: v => v | 0x2 } }] : [];
+    },
+  },
   'head|macStyle': {
     kind: 'bitfield', bits: MACSTYLE_BITS,
     link: { table: 'OS/2', field: 'fsSelection', label: 'ITALIC / BOLD / REGULAR',
@@ -454,10 +477,10 @@ const UNICODE_RANGE_BITS = [
   /*13*/ [['Arabic', 0x0600, 0x06FF], ['Arabic Supplement', 0x0750, 0x077F]],
   /*14*/ [['NKo', 0x07C0, 0x07FF]],
   /*15*/ [['Devanagari', 0x0900, 0x097F]],
-  /*16*/ [['Bengali', 0x0980, 0x09FF]],
+  /*16*/ [['Bangla', 0x0980, 0x09FF]],
   /*17*/ [['Gurmukhi', 0x0A00, 0x0A7F]],
   /*18*/ [['Gujarati', 0x0A80, 0x0AFF]],
-  /*19*/ [['Oriya', 0x0B00, 0x0B7F]],
+  /*19*/ [['Odia', 0x0B00, 0x0B7F]],
   /*20*/ [['Tamil', 0x0B80, 0x0BFF]],
   /*21*/ [['Telugu', 0x0C00, 0x0C7F]],
   /*22*/ [['Kannada', 0x0C80, 0x0CFF]],
@@ -495,7 +518,7 @@ const UNICODE_RANGE_BITS = [
   /*54*/ [['Enclosed CJK Letters And Months', 0x3200, 0x32FF]],
   /*55*/ [['CJK Compatibility', 0x3300, 0x33FF]],
   /*56*/ [['Hangul Syllables', 0xAC00, 0xD7AF]],
-  /*57*/ [['Non-Plane 0 (any character above U+FFFF)', 0x10000, 0x10FFFF]],
+  /*57*/ [['Non-Plane 0', 0x10000, 0x10FFFF]],  // set when any character is above U+FFFF
   /*58*/ [['Phoenician', 0x10900, 0x1091F]],
   /*59*/ [['CJK Unified Ideographs', 0x4E00, 0x9FFF], ['CJK Radicals Supplement', 0x2E80, 0x2EFF], ['Kangxi Radicals', 0x2F00, 0x2FDF], ['Ideographic Description Characters', 0x2FF0, 0x2FFF], ['CJK Unified Ideographs Extension A', 0x3400, 0x4DBF], ['CJK Unified Ideographs Extension B', 0x20000, 0x2A6DF], ['Kanbun', 0x3190, 0x319F]],
   /*60*/ [['Private Use Area (plane 0)', 0xE000, 0xF8FF]],
@@ -568,14 +591,14 @@ const NON_PLANE_0_BIT = 57;
 const CODEPAGE_BITS = {
   0:'1252 Latin 1', 1:'1250 Latin 2: Eastern Europe', 2:'1251 Cyrillic', 3:'1253 Greek',
   4:'1254 Turkish', 5:'1255 Hebrew', 6:'1256 Arabic', 7:'1257 Windows Baltic', 8:'1258 Vietnamese',
-  16:'874 Thai', 17:'932 JIS / Japan', 18:'936 Chinese: Simplified (PRC, Singapore)',
-  19:'949 Korean Wansung', 20:'950 Chinese: Traditional (Taiwan, Hong Kong)', 21:'1361 Korean Johab',
+  16:'874 Thai', 17:'932 JIS/Japan', 18:'936 Chinese: Simplified chars\u2014PRC and Singapore',
+  19:'949 Korean Wansung', 20:'950 Chinese: Traditional chars\u2014Taiwan and Hong Kong SAR', 21:'1361 Korean Johab',
   29:'Macintosh Character Set (US Roman)', 30:'OEM Character Set', 31:'Symbol Character Set',
   48:'869 IBM Greek', 49:'866 MS-DOS Russian', 50:'865 MS-DOS Nordic', 51:'864 Arabic',
   52:'863 MS-DOS Canadian French', 53:'862 Hebrew', 54:'861 MS-DOS Icelandic',
   55:'860 MS-DOS Portuguese', 56:'857 IBM Turkish', 57:'855 IBM Cyrillic; primarily Russian',
   58:'852 Latin 2', 59:'775 MS-DOS Baltic', 60:'737 Greek; former 437 G',
-  61:'708 Arabic; ASMO 708', 62:'850 WE / Latin 1', 63:'437 US',
+  61:'708 Arabic; ASMO 708', 62:'850 WE/Latin 1', 63:'437 US',
 };
 
 // sFamilyClass: high byte = class, low byte = subclass (IBM font classification)
@@ -617,11 +640,14 @@ const UNICODE_RANGE_SPEC = {
   kind: 'bitset', label: 'Unicode ranges', coverage: true,
   fields: ['ulUnicodeRange1', 'ulUnicodeRange2', 'ulUnicodeRange3', 'ulUnicodeRange4'],
   bitName: b => UNICODE_RANGE_BITS[b] ? UNICODE_RANGE_BITS[b].map(r => r[0]).join('; ') : null,
+  // OS/2 version where a bit was first assigned (older apps may ignore it)
+  minVersion: b => b === 58 || b >= 93 ? 4 : b >= 84 ? 3 : b >= 70 ? 2 : 1,
 };
 const CODEPAGE_RANGE_SPEC = {
   kind: 'bitset', label: 'Code page ranges',
   fields: ['ulCodePageRange1', 'ulCodePageRange2'],
   bitName: b => CODEPAGE_BITS[b] || null,
+  minVersion: b => b === 8 ? 2 : 1,
 };
 for (const spec of [UNICODE_RANGE_SPEC, CODEPAGE_RANGE_SPEC])
   for (const fl of spec.fields) FIELD_SPECS['OS/2|' + fl] = spec;
@@ -648,6 +674,8 @@ function getUnicodeCoverage(fontIdx) {
   const cov = new Array(128).fill(0);
   for (const key of Object.keys(map)) {
     const cp = +key;
+    // ZWNBSP / BOM is in Arabic Presentation Forms-B, but says nothing about Arabic support
+    if (cp === 0xFEFF) continue;
     const bit = unicodeRangeBitOf(cp);
     if (bit >= 0) cov[bit]++;
     if (cp > 0xFFFF) cov[NON_PLANE_0_BIT]++;
@@ -669,9 +697,9 @@ function fsSelectionFromMacStyle(macStyle, fsSel) {
   let v = fsSel;
   for (const l of STYLE_LINKS)
     v = (macStyle & (1 << l.mac)) ? v | (1 << l.fs) : v & ~(1 << l.fs);
-  if (v === fsSel) return fsSel;
-  // ITALIC / BOLD changed: REGULAR is set exactly when neither of them is
-  return (v & 0x21) ? v & ~0x40 : v | 0x40;
+  // REGULAR must be clear with ITALIC / BOLD. Without them it stays as is:
+  // the spec says both clear "does not give any indication" about REGULAR (e.g. a Light face)
+  return (v & 0x21) ? v & ~0x40 : v;
 }
 
 // ── Binary layout descriptors (for serialization) ──
@@ -1105,7 +1133,9 @@ function describeBits(val, spec) {
   let rest = v;
   if (spec.group) {
     const g = v & spec.group.mask;
-    parts.push(spec.group.options[g] != null ? spec.group.options[g] : `invalid usage 0x${g.toString(16).toUpperCase()}`);
+    parts.push(spec.group.options[g] != null ? spec.group.options[g]
+      : [0, 1, 2, 3].filter(b => g & (1 << b))
+          .map(b => spec.group.options[1 << b] != null ? spec.group.options[1 << b] : `bit ${b} (reserved)`).join(' + '));
     rest &= ~spec.group.mask;
   }
   for (let bit = 0; bit < 16; bit++)
@@ -1455,6 +1485,12 @@ function getFieldWarnings(fontIdx, tableName, field, val, opts = {}) {
     for (let k = 0; k < 32; k++)
       if (((val >>> k) & 1) && !spec.bitName(base + k)) reserved.push(base + k);
     if (reserved.length) w.push({ msg: `Reserved bit${reserved.length > 1 ? 's' : ''} ${reserved.join(', ')} set (should be 0)` });
+    const newer = [];
+    for (let k = 0; k < 32; k++)
+      if (((val >>> k) & 1) && spec.bitName(base + k) && os2Version != null && spec.minVersion(base + k) > os2Version)
+        newer.push(`${base + k} (v${spec.minVersion(base + k)})`);
+    if (newer.length) w.push({ level: 'info',
+      msg: `Bit${newer.length > 1 ? 's' : ''} ${listNames(newer)} assigned after OS/2 v${os2Version}; older apps may ignore ${newer.length > 1 ? 'them' : 'it'}` });
     const cov = spec.coverage ? getUnicodeCoverage(fontIdx) : null;
     if (cov) {
       const setEmpty = [], unset = [];
@@ -1465,8 +1501,9 @@ function getFieldWarnings(fontIdx, tableName, field, val, opts = {}) {
         if (((val >>> k) & 1) && !cov[b]) setEmpty.push(name);
         else if (!((val >>> k) & 1) && cov[b]) unset.push(`${name} (${cov[b]})`);
       }
-      if (setEmpty.length) w.push({ msg: `Set, but no characters in cmap: ${listNames(setEmpty)}` });
-      if (unset.length) w.push({ msg: `Characters in cmap, but not set: ${listNames(unset)}` });
+      // "Functional" is up to the designer, so these are hints, not errors
+      if (setEmpty.length) w.push({ level: 'info', msg: `Set, but no characters in cmap: ${listNames(setEmpty)}` });
+      if (unset.length) w.push({ level: 'info', msg: `Characters in cmap, but not set: ${listNames(unset)}` });
     }
     return w;
   }
@@ -1479,8 +1516,19 @@ function getFieldWarnings(fontIdx, tableName, field, val, opts = {}) {
     return w;
   }
   if (spec.kind === 'bitfield') {
-    if (spec.group && spec.group.options[val & spec.group.mask] == null)
-      w.push({ msg: `${spec.group.label}: only one of bits 1\u20133 may be set` });
+    const g = spec.group ? val & spec.group.mask : 0;
+    if (spec.group && spec.group.options[g] == null) {
+      if (g & 1) w.push({ msg: 'Bit 0 is reserved and must be zero', fix: clearBit(0) });
+      if ([1, 2, 3].filter(b => g & (1 << b)).length > 1) {
+        // Mutually exclusive since OS/2 v3; before that the least-restrictive one applied
+        if (os2Version == null || os2Version >= 3)
+          w.push({ msg: `${spec.group.label}: at most one of bits 1\u20133 may be set` });
+        else
+          w.push({ level: 'info', msg: `${spec.group.label}: several bits set; allowed in OS/2 v${os2Version}, the least-restrictive applies` });
+      }
+    }
+    for (const [bit, reason] of Object.entries(spec.shouldBeClear || {}))
+      if (val & (1 << bit)) w.push({ msg: `${spec.bits[bit]}: ${reason}`, fix: clearBit(+bit) });
     for (const [a, b] of spec.conflicts || [])
       if ((val & (1 << a)) && (val & (1 << b)))
         w.push({ msg: `${spec.bits[a]} must not be combined with ${spec.bits[b]}`,
@@ -1499,6 +1547,7 @@ function getFieldWarnings(fontIdx, tableName, field, val, opts = {}) {
       w.push({ msg: `Should be ${spec.recommended.value}: ${spec.recommended.reason}`,
                fix: { label: `Set ${spec.recommended.value}`, apply: () => spec.recommended.value } });
   }
+  if (spec.check) w.push(...spec.check(fontIdx, val));
   if (spec.link && !opts.skipLink && fieldExists(fontIdx, spec.link.table, spec.link.field)) {
     const other = getCurrentIntValue(fontIdx, spec.link.table, spec.link.field);
     const diff = other == null ? [] : spec.link.mismatch(val, other);
@@ -1506,6 +1555,18 @@ function getFieldWarnings(fontIdx, tableName, field, val, opts = {}) {
       w.push({ msg: `${diff.join(' / ')} differ${diff.length === 1 ? 's' : ''} from ${spec.link.table}.${spec.link.field}` });
   }
   return w;
+}
+
+// ⚠ for spec violations, ⓘ for hints only
+function warningIcon(w) { return w.level === 'info' ? '\u24d8' : '\u26a0'; }
+function warningMarker(warns) {
+  if (!warns.length) return '';
+  const info = warns.every(w => w.level === 'info');
+  return ` <span class="${info ? 'cell-info' : 'cell-warn'}" title="${escHtml(warns.map(w => w.msg).join('\n'))}">${
+    info ? '\u24d8' : '\u26a0'}</span>`;
+}
+function warningLine(w, extra = '') {
+  return `<div class="${w.level === 'info' ? 'info' : ''}">${warningIcon(w)} ${escHtml(w.msg)}${extra}</div>`;
 }
 
 function openFieldPopover(td, fontIdx, tableName, field, spec) {
@@ -1639,8 +1700,8 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
     }
     shownWarnings = rawError ? [{ msg: rawError }]
       : getFieldWarnings(fontIdx, tableName, field, val, { skipLink: syncLink() });
-    let html = shownWarnings.map((w, k) => `<div>\u26a0 ${escHtml(w.msg)}${w.fix
-      ? ` <button class="fp-fix" data-k="${k}">${escHtml(w.fix.label)}</button>` : ''}</div>`).join('');
+    let html = shownWarnings.map((w, k) => warningLine(w, w.fix
+      ? ` <button class="fp-fix" data-k="${k}">${escHtml(w.fix.label)}</button>` : '')).join('');
     // What "Apply to all" would leave broken in the other fonts
     if (!rawError && spec.kind === 'bitfield' && otherFonts.length > 1) {
       const issues = [];
@@ -1867,7 +1928,7 @@ function openBitsetPopover(td, fontIdx, tableName, field, spec) {
     if (err) html = `<div>⚠ ${escHtml(err)}</div>`;
     else {
       const w = spec.fields.flatMap((fl, k) => getFieldWarnings(fontIdx, tableName, fl, vals[k]));
-      html = w.map(x => `<div>⚠ ${escHtml(x.msg)}</div>`).join('');
+      html = w.map(x => warningLine(x)).join('');
       const n = vals.reduce((a, x) => { for (; x; x &= x - 1) a++; return a; }, 0);
       html += `<div class="fp-summary">${n} bit${n !== 1 ? 's' : ''} set</div>`;
     }
@@ -2199,9 +2260,7 @@ function buildCompareTable(title, tableName, getRowData, formatVal, extraFields)
         ? '<span style="color:var(--red);font-style:italic;">\u232b DELETE</span>'
         : formatCell(isEdited ? change.new_value : v);
       if (editKind && !isDelete) {
-        const warns = getFieldWarnings(i, tableName, field, parseIntInput(isEdited ? change.new_value : v));
-        if (warns.length)
-          cellContent += ` <span class="cell-warn" title="${escHtml(warns.map(w => w.msg).join('\n'))}">\u26a0</span>`;
+        cellContent += warningMarker(getFieldWarnings(i, tableName, field, parseIntInput(isEdited ? change.new_value : v)));
       }
       html += readonly
         ? `<td class="val readonly" title="Read-only field">${cellContent}</td>`
