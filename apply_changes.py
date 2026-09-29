@@ -146,7 +146,7 @@ def apply_os2_change(font, field, new_value):
 
 HEAD_INT_FIELDS = {
     "flags", "unitsPerEm", "macStyle", "lowestRecPPEM",
-    "fontDirectionHint", "indexToLocFormat", "glyphDataFormat",
+    "fontDirectionHint",
 }
 
 HEAD_FLOAT_FIELDS = {"fontRevision"}

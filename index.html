@@ -190,6 +190,77 @@ table.compare td.size-cell {
   cursor: pointer; color: var(--text);
 }
 .name-id-dropdown .item:hover { background: var(--bg-row); color: var(--accent); }
+table.compare tbody td.val.readonly { cursor: default; color: var(--text-dim); }
+table.compare tbody td.val.readonly:hover { outline: none; }
+table.compare tbody td.val.has-picker { cursor: pointer; }
+table.compare tbody td.val.has-picker.editing { padding: 5px 10px; }
+table.compare tbody td.val.invalid { outline-color: var(--red); }
+table.compare tbody td.val .cell-error {
+  font-size: 10px; color: var(--red); padding: 0 10px; font-family: var(--font-ui);
+}
+table.compare tbody td.val .cell-error:empty { display: none; }
+.toast {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 30;
+  background: var(--bg-surface); border: 1px solid var(--red); color: var(--text);
+  font-size: 12px; padding: 8px 14px; border-radius: 4px; max-width: calc(100vw - 32px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4); transition: opacity 0.4s;
+}
+.toast.hide { opacity: 0; }
+</style>
+<style>
+.field-popover {
+  position: fixed; z-index: 20; width: 340px; max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px); overflow-y: auto;
+  background: var(--bg-surface); border: 1px solid var(--border-edit); border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-size: 12px;
+}
+.field-popover .fp-head {
+  display: flex; align-items: baseline; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.field-popover .fp-field { font-family: var(--font-mono); font-weight: 700; color: var(--accent); }
+.field-popover .fp-file {
+  font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; min-width: 0; flex: 1; text-align: right;
+}
+.field-popover .fp-body { padding: 4px 0; }
+.field-popover .fp-group-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-dim); padding: 6px 12px 2px;
+}
+.field-popover .fp-row {
+  display: flex; align-items: center; gap: 8px; padding: 3px 12px; cursor: pointer;
+}
+.field-popover .fp-row:hover { background: var(--bg-row); }
+.field-popover .fp-row input { accent-color: var(--blue); margin: 0; }
+.field-popover .fp-bit {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); width: 3.5em; text-align: right;
+}
+.field-popover .fp-name { font-family: var(--font-mono); font-size: 11px; flex: 1; }
+.field-popover .fp-note { font-size: 10px; color: var(--text-dim); }
+.field-popover .fp-row.reserved .fp-name { color: var(--red); }
+.field-popover .fp-raw-row {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+.field-popover .fp-raw-row label { font-size: 11px; color: var(--text-dim); }
+.field-popover .fp-raw {
+  width: 90px; background: var(--bg); color: var(--text); border: 1px solid var(--border-accent);
+  border-radius: 3px; padding: 3px 6px; font-family: var(--font-mono); font-size: 11px; outline: none;
+}
+.field-popover .fp-raw:focus { border-color: var(--blue); }
+.field-popover .fp-raw.invalid { border-color: var(--red); }
+.field-popover .fp-hex { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+.field-popover .fp-warnings { padding: 0 12px; font-size: 11px; color: var(--accent); }
+.field-popover .fp-warnings:not(:empty) { padding-bottom: 8px; }
+.field-popover .fp-warnings.error { color: var(--red); }
+.field-popover .fp-actions {
+  display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border);
+}
+.field-popover .fp-actions .btn { padding: 4px 10px; }
+.field-popover .fp-actions .btn:disabled { opacity: 0.35; cursor: default; }
+.field-popover .fp-apply { border-color: var(--blue); color: var(--blue); }
+.field-popover .fp-hint { font-size: 10px; color: var(--text-dim); padding: 0 12px 8px; }
 </style>
 </head>
 <body>
@@ -272,10 +343,37 @@ const HEAD_FIELDS = [
 
 const WEIGHT_NAMES = {100:'Thin',200:'ExtraLight',250:'ExtraLight',300:'Light',350:'SemiLight',400:'Regular',500:'Medium',600:'SemiBold',700:'Bold',800:'ExtraBold',900:'Black',950:'ExtraBlack'};
 const WIDTH_NAMES = {1:'Ultra-condensed',2:'Extra-condensed',3:'Condensed',4:'Semi-condensed',5:'Normal',6:'Semi-expanded',7:'Expanded',8:'Extra-expanded',9:'Ultra-expanded'};
-const FSTYPE_BITS = {1:'Restricted License',2:'Preview & Print',3:'Editable',8:'No Subsetting',9:'Bitmap Only'};
+// fsType bits 0–3 are a single usage-permission value, not independent flags
+const FSTYPE_USAGE = {0:'Installable',2:'Restricted License',4:'Preview & Print',8:'Editable'};
+const FSTYPE_BITS = {8:'No Subsetting',9:'Bitmap Only'};
 const FSSELECTION_BITS = {0:'ITALIC',1:'UNDERSCORE',2:'NEGATIVE',3:'OUTLINED',4:'STRIKEOUT',5:'BOLD',6:'REGULAR',7:'USE_TYPO_METRICS',8:'WWS',9:'OBLIQUE'};
 const HEAD_FLAGS_BITS = {0:'Y0_IS_BASELINE',1:'X_LSB_IS_AT_0',2:'SCALED_POINT_SIZE_DIFFERS',3:'USE_INTEGER_SCALING',4:'INSTRUCTIONS_ALTER_ADVANCE',5:'VERTICAL_LAYOUT',11:'LOSSLESS_COMPRESSION',12:'CONVERTED_FONT',13:'CLEARTYPE_OPTIMIZED',14:'LAST_RESORT_FONT'};
 const MACSTYLE_BITS = {0:'Bold',1:'Italic',2:'Underline',3:'Outline',4:'Shadow',5:'Condensed',6:'Extended'};
+const FONT_DIRECTION_NAMES = {'-2':'Right-to-left + neutrals','-1':'Right-to-left only',0:'Mixed',1:'Left-to-right only',2:'Left-to-right + neutrals'};
+
+// Fields with a fixed set of values get a popover editor instead of a textarea.
+// Keyed by "table|field".
+//   bitfield: bits {bit: name}, notes {bit: hint}, minVersion {bit: OS/2 version},
+//             conflicts [[a, b], ...] (bits that must not be set together),
+//             group {mask, label, options} (bits under mask form one enum value)
+//   enum:     options {value: name}, min/max (valid range), free (any value in range is fine)
+const FIELD_SPECS = {
+  'OS/2|fsSelection': {
+    kind: 'bitfield', bits: FSSELECTION_BITS,
+    notes: {1:'legacy', 2:'legacy', 3:'legacy', 4:'legacy', 6:'exclusive with ITALIC / BOLD'},
+    minVersion: {7:4, 8:4, 9:4},
+    conflicts: [[6, 0], [6, 5]],
+  },
+  'OS/2|fsType': {
+    kind: 'bitfield', bits: FSTYPE_BITS,
+    group: {mask: 0x000F, label: 'Usage permissions', options: FSTYPE_USAGE},
+  },
+  'head|flags':    { kind: 'bitfield', bits: HEAD_FLAGS_BITS },
+  'head|macStyle': { kind: 'bitfield', bits: MACSTYLE_BITS },
+  'OS/2|usWidthClass':  { kind: 'enum', options: WIDTH_NAMES, min: 1, max: 9 },
+  'OS/2|usWeightClass': { kind: 'enum', options: WEIGHT_NAMES, min: 1, max: 1000, free: true },
+  'head|fontDirectionHint': { kind: 'enum', options: FONT_DIRECTION_NAMES, min: -2, max: 2 },
+};
 
 // ── Binary layout descriptors (for serialization) ──
 const HEAD_LAYOUT = [
@@ -295,8 +393,8 @@ const HEAD_LAYOUT = [
   {name:'macStyle',           offset:44, type:'uint16'},
   {name:'lowestRecPPEM',      offset:46, type:'uint16'},
   {name:'fontDirectionHint',  offset:48, type:'int16'},
-  {name:'indexToLocFormat',   offset:50, type:'int16'},
-  {name:'glyphDataFormat',    offset:52, type:'int16'},
+  {name:'indexToLocFormat',   offset:50, type:'int16',        readonly:true},  // must match loca
+  {name:'glyphDataFormat',    offset:52, type:'int16',        readonly:true},
 ];
 
 const OS2_LAYOUT_BASE = [
@@ -346,6 +444,19 @@ const OS2_LAYOUT_V5 = [
   {name:'usLowerOpticalPointSize', offset:96, type:'uint16'},
   {name:'usUpperOpticalPointSize', offset:98, type:'uint16'},
 ];
+// Layout entry for a field regardless of OS/2 version (field names are unique)
+function findFieldDef(tableName, field) {
+  if (tableName === 'head') return HEAD_LAYOUT.find(d => d.name === field);
+  if (tableName === 'OS/2')
+    return [...OS2_LAYOUT_BASE, ...OS2_LAYOUT_V1, ...OS2_LAYOUT_V2, ...OS2_LAYOUT_V5]
+      .find(d => d.name === field);
+  return undefined;
+}
+function isReadonlyField(tableName, field) {
+  const d = findFieldDef(tableName, field);
+  return !!(d && d.readonly);
+}
+
 function getOS2Layout(version) {
   const l = [...OS2_LAYOUT_BASE];
   if (version >= 1) l.push(...OS2_LAYOUT_V1);
@@ -391,6 +502,8 @@ function readField(dv, base, f) {
   }
 }
 function writeField(dv, base, f, val) {
+  // Never write a value that failed to parse: keep the original bytes instead
+  if (val == null || (typeof val === 'number' && isNaN(val))) return;
   const o = base + f.offset;
   switch (f.type) {
     case 'uint16': dv.setUint16(o, val); break;
@@ -603,20 +716,70 @@ function parseAvar(bytes) {
 // Value parsing (display string -> typed value for binary)
 // ══════════════════════════════════════════════════════════
 
+// Strips annotations like "400 (Regular)" or "65 — ITALIC"; returns NaN unless
+// the rest is a plain decimal or 0x-hex integer.
 function parseIntInput(s) {
   s = s.trim();
   for (const sep of [' \u2014', ' (', '  ']) {
     const i = s.indexOf(sep);
     if (i !== -1) s = s.substring(0, i).trim();
   }
-  if (s.startsWith('0x') || s.startsWith('0X')) return parseInt(s, 16);
-  return parseInt(s, 10);
+  if (/^0x[0-9a-f]+$/i.test(s)) return parseInt(s, 16);
+  if (/^[-+]?\d+$/.test(s)) return parseInt(s, 10);
+  return NaN;
 }
 
 function parseDateInput(s) {
   const c = s.trim().replace(' UTC','Z').replace(' ','T');
   const d = new Date(c);
-  return isNaN(d.getTime()) ? new Date() : d;
+  return isNaN(d.getTime()) ? null : d;
+}
+
+const INT_RANGES = {
+  uint16: [0, 0xFFFF], int16: [-0x8000, 0x7FFF], uint32: [0, 0xFFFFFFFF],
+};
+
+// Checks user input for a field and brings it to canonical display form
+// (e.g. "65" -> "65 — ITALIC, REGULAR"). Returns {display} or {error}.
+function validateFieldInput(tableName, field, input) {
+  if (tableName === 'name') return { display: input };
+  const fDef = findFieldDef(tableName, field);
+  if (!fDef) return { display: input };
+  if (fDef.readonly) return { error: `${field} is read-only` };
+  const formatVal = tableName === 'head' ? formatHeadValue : formatOS2Value;
+  const s = input.trim();
+  switch (fDef.type) {
+    case 'uint16': case 'int16': case 'uint32': {
+      const v = parseIntInput(s);
+      if (isNaN(v)) return { error: `"${s}" is not an integer (decimal or 0x-hex)` };
+      const [lo, hi] = INT_RANGES[fDef.type];
+      if (v < lo || v > hi) return { error: `${v} is out of ${fDef.type} range ${lo}\u2026${hi}` };
+      const spec = FIELD_SPECS[tableName + '|' + field];
+      if (spec && spec.min != null && (v < spec.min || v > spec.max))
+        return { error: `${field} must be within ${spec.min}\u2026${spec.max}` };
+      return { display: formatVal(field, v) };
+    }
+    case 'fixed16.16':
+      if (!/^[-+]?\d+(\.\d+)?$/.test(s)) return { error: `"${s}" is not a number` };
+      if (Math.abs(parseFloat(s)) >= 32768) return { error: `${s} is out of Fixed range` };
+      return { display: s };
+    case 'longdatetime': {
+      const d = parseDateInput(s);
+      if (!d) return { error: `"${s}" is not a date (expected YYYY-MM-DD HH:MM:SS UTC)` };
+      return { display: formatVal(field, d) };
+    }
+    case 'tag':
+      if (input.length < 1 || input.length > 4 || !/^[\x20-\x7E]+$/.test(input))
+        return { error: 'Tag must be 1\u20134 printable ASCII characters' };
+      return { display: input };
+    case 'bytes': {
+      const parts = s.split(/\s+/);
+      if (parts.length !== fDef.length || parts.some(p => !/^\d+$/.test(p) || +p > 255))
+        return { error: `Expected ${fDef.length} integers 0\u2026255 separated by spaces` };
+      return { display: parts.map(Number).join(' ') };
+    }
+  }
+  return { display: input };
 }
 
 function parseFieldValue(fDef, displayStr) {
@@ -635,13 +798,23 @@ function parseFieldValue(fDef, displayStr) {
 // Decode helpers & Formatters (for display via opentype.js)
 // ══════════════════════════════════════════════════════════
 
-function decodeBitfield(val, bitsMap) {
+// Human-readable list of set bits; unnamed set bits are shown as "bit N"
+function describeBits(val, spec) {
   if (val == null) return '';
   const v = typeof val === 'number' ? val : parseInt(val);
-  const flags = [];
-  for (const [bit, name] of Object.entries(bitsMap))
-    if (v & (1 << parseInt(bit))) flags.push(name);
-  return flags.length ? flags.join(', ') : '(none)';
+  const parts = [];
+  let rest = v;
+  if (spec.group) {
+    const g = v & spec.group.mask;
+    parts.push(spec.group.options[g] != null ? spec.group.options[g] : `invalid usage 0x${g.toString(16).toUpperCase()}`);
+    rest &= ~spec.group.mask;
+  }
+  for (let bit = 0; bit < 16; bit++)
+    if (rest & (1 << bit)) parts.push(spec.bits[bit] || `bit ${bit}`);
+  return parts.length ? parts.join(', ') : '(none)';
+}
+function formatBitfield(table, field, val) {
+  return `${val} \u2014 ${describeBits(val, FIELD_SPECS[table + '|' + field])}`;
 }
 function formatPanose(arr) {
   if (!arr) return '';
@@ -710,8 +883,7 @@ function formatOS2Value(field, val) {
   switch (field) {
     case 'usWeightClass': return `${val}` + (WEIGHT_NAMES[val] ? ` (${WEIGHT_NAMES[val]})` : '');
     case 'usWidthClass':  return `${val}` + (WIDTH_NAMES[val] ? ` (${WIDTH_NAMES[val]})` : '');
-    case 'fsType':      return `${val} \u2014 ${decodeBitfield(val, FSTYPE_BITS)}`;
-    case 'fsSelection': return `${val} \u2014 ${decodeBitfield(val, FSSELECTION_BITS)}`;
+    case 'fsType': case 'fsSelection': return formatBitfield('OS/2', field, val);
     case 'panose': return formatPanose(val);
     case 'ulUnicodeRange1': case 'ulUnicodeRange2': case 'ulUnicodeRange3': case 'ulUnicodeRange4':
     case 'ulCodePageRange1': case 'ulCodePageRange2': return hex32(val);
@@ -724,8 +896,7 @@ function formatHeadValue(field, val) {
   switch (field) {
     case 'magicNumber': return '0x' + (val >>> 0).toString(16).toUpperCase().padStart(8, '0');
     case 'fontRevision': return typeof val === 'number' ? val.toFixed(3) : String(val);
-    case 'flags': return `${val} \u2014 ${decodeBitfield(val, HEAD_FLAGS_BITS)}`;
-    case 'macStyle': return `${val} \u2014 ${decodeBitfield(val, MACSTYLE_BITS)}`;
+    case 'flags': case 'macStyle': return formatBitfield('head', field, val);
     case 'created': case 'modified': {
       // opentype.js returns LONGDATETIME as Unix *seconds* (a Number),
       // our binary reader returns a Date. Handle both.
@@ -736,10 +907,8 @@ function formatHeadValue(field, val) {
       if (isNaN(d.getTime())) return String(val);
       return d.toISOString().replace('T',' ').replace(/\.000Z$/,' UTC');
     }
-    case 'fontDirectionHint': {
-      const h = {0:'Mixed',1:'Left-to-right only',2:'Left-to-right + neutrals','-1':'Right-to-left only','-2':'Right-to-left + neutrals'};
-      return `${val}` + (h[val] ? ` (${h[val]})` : '');
-    }
+    case 'fontDirectionHint':
+      return `${val}` + (FONT_DIRECTION_NAMES[val] ? ` (${FONT_DIRECTION_NAMES[val]})` : '');
     case 'indexToLocFormat': return val === 0 ? '0 (short offsets)' : '1 (long offsets)';
     default: return String(val);
   }
@@ -845,67 +1014,336 @@ function updateChangesCount() {
 // Editing
 // ══════════════════════════════════════════════════════════
 
-function startEdit(td, fontIdx, tableName, field) {
-  if (td.classList.contains('editing')) return;
-  td.classList.add('editing');
-
+// Records newVal (display form) as a pending change, or drops the change
+// if it matches the original.
+function setFieldValue(fontIdx, tableName, field, newVal) {
   const key = fonts[fontIdx].fileName + '|' + tableName + '|' + field;
-  let editVal = pendingChanges.has(key)
+  const origDisplay = getOriginalDisplayValue(fontIdx, tableName, field);
+  if (newVal !== origDisplay) {
+    const change = {
+      file: fonts[fontIdx].fileName, table: tableName,
+      field: field, old_value: origDisplay, new_value: newVal,
+    };
+    if (tableName === 'name' && newVal.trim() === '' && origDisplay !== '')
+      change.action = 'delete';
+    pendingChanges.set(key, change);
+  } else {
+    pendingChanges.delete(key);
+  }
+  updateChangesCount();
+}
+
+function getCurrentDisplayValue(fontIdx, tableName, field) {
+  const key = fonts[fontIdx].fileName + '|' + tableName + '|' + field;
+  return pendingChanges.has(key)
     ? pendingChanges.get(key).new_value
     : getOriginalDisplayValue(fontIdx, tableName, field);
+}
 
+function renderCellContent(td, fontIdx, tableName, field) {
+  const key = fonts[fontIdx].fileName + '|' + tableName + '|' + field;
+  const ch = pendingChanges.get(key);
+  if (ch && ch.action === 'delete') {
+    td.innerHTML = '<span style="color:var(--red);font-style:italic;">⌫ DELETE</span>';
+    td.classList.add('marked-delete');
+  } else {
+    td.innerHTML = formatCell(getCurrentDisplayValue(fontIdx, tableName, field));
+    td.classList.remove('marked-delete');
+  }
+  td.classList.toggle('edited', !!ch);
+}
+
+function startEdit(td, fontIdx, tableName, field) {
+  if (td.classList.contains('editing')) return;
+  if (isReadonlyField(tableName, field)) return;
+  const spec = FIELD_SPECS[tableName + '|' + field];
+  if (spec) { openFieldPopover(td, fontIdx, tableName, field, spec); return; }
+
+  td.classList.add('editing');
   const textarea = document.createElement('textarea');
   textarea.className = 'cell-edit';
-  textarea.value = editVal;
+  textarea.value = getCurrentDisplayValue(fontIdx, tableName, field);
+  const errBox = document.createElement('div');
+  errBox.className = 'cell-error';
   td.innerHTML = '';
   td.appendChild(textarea);
+  td.appendChild(errBox);
   textarea.focus();
   textarea.select();
 
+  let cancelled = false;
   const finish = () => {
-    const newVal = textarea.value;
-    td.classList.remove('editing');
-    const origDisplay = getOriginalDisplayValue(fontIdx, tableName, field);
-
-    if (newVal !== origDisplay) {
-      const change = {
-        file: fonts[fontIdx].fileName, table: tableName,
-        field: field, old_value: origDisplay, new_value: newVal,
-      };
-      if (tableName === 'name' && newVal.trim() === '' && origDisplay !== '')
-        change.action = 'delete';
-      pendingChanges.set(key, change);
-      td.classList.add('edited');
-    } else {
-      pendingChanges.delete(key);
-      td.classList.remove('edited');
+    td.classList.remove('editing', 'invalid');
+    if (!cancelled) {
+      const res = validateFieldInput(tableName, field, textarea.value);
+      if (res.error) {
+        showToast(`${field}: ${res.error} — edit discarded`);
+      } else {
+        const prevDisplay = getCurrentDisplayValue(fontIdx, tableName, field);
+        setFieldValue(fontIdx, tableName, field, res.display);
+        // Auto-propagate fontRevision to name ID 5 (Version String) and ID 3 (Unique ID)
+        if (tableName === 'head' && field === 'fontRevision' && res.display !== prevDisplay) {
+          propagateFontRevisionToName(fontIdx, res.display);
+          return;
+        }
+      }
     }
-
-    const ch = pendingChanges.get(key);
-    if (ch && ch.action === 'delete') {
-      td.innerHTML = '<span style="color:var(--red);font-style:italic;">\u232b DELETE</span>';
-      td.classList.add('marked-delete');
-    } else {
-      td.innerHTML = formatCell(newVal);
-      td.classList.remove('marked-delete');
-    }
-    if (pendingChanges.has(key)) td.classList.add('edited');
-    updateChangesCount();
-
-    // Auto-propagate fontRevision to name ID 5 (Version String) and ID 3 (Unique ID)
-    if (tableName === 'head' && field === 'fontRevision' && newVal !== origDisplay) {
-      propagateFontRevisionToName(fontIdx, newVal);
-    }
+    renderCellContent(td, fontIdx, tableName, field);
   };
 
   textarea.addEventListener('blur', finish);
+  textarea.addEventListener('input', () => { td.classList.remove('invalid'); errBox.textContent = ''; });
   textarea.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-      textarea.value = getOriginalDisplayValue(fontIdx, tableName, field);
-      textarea.blur();
+    if (e.key === 'Escape') { cancelled = true; textarea.blur(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const res = validateFieldInput(tableName, field, textarea.value);
+      if (res.error) { td.classList.add('invalid'); errBox.textContent = res.error; }
+      else textarea.blur();
     }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); textarea.blur(); }
   });
+}
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.classList.add('hide'), 3500);
+  setTimeout(() => t.remove(), 4000);
+}
+
+// ── Popover editor for bitfields and enums ──
+
+let activePopover = null;
+
+function closeFieldPopover(apply) {
+  if (!activePopover) return;
+  const p = activePopover;
+  activePopover = null;
+  p.cleanup();
+  if (apply) p.apply();
+}
+
+// Current integer value of a field: pending edit if any, else original
+function getCurrentIntValue(fontIdx, tableName, field) {
+  const v = parseIntInput(getCurrentDisplayValue(fontIdx, tableName, field));
+  return isNaN(v) ? null : v;
+}
+
+function fieldExists(fontIdx, tableName, field) {
+  const t = tableName === 'head' ? fonts[fontIdx].headTable : fonts[fontIdx].os2Table;
+  return !!t && t[field] != null;
+}
+
+function openFieldPopover(td, fontIdx, tableName, field, spec) {
+  closeFieldPopover(false);
+  const f = fonts[fontIdx];
+  const fDef = findFieldDef(tableName, field);
+  const [lo, hi] = INT_RANGES[fDef.type];
+  const formatVal = tableName === 'head' ? formatHeadValue : formatOS2Value;
+  const os2Version = f.os2Table ? f.os2Table.version : null;
+  const startVal = getCurrentIntValue(fontIdx, tableName, field) ?? 0;
+  let val = startVal;
+  const otherFonts = fonts.map((_, i) => i).filter(i => fieldExists(i, tableName, field));
+
+  td.classList.add('editing');
+  const pop = document.createElement('div');
+  pop.className = 'field-popover';
+  pop.innerHTML = `
+    <div class="fp-head">
+      <span class="fp-field">${tableName}.${field}</span>
+      <span class="fp-file" title="${escHtml(f.fileName)}">${escHtml(f.fileName)}</span>
+    </div>
+    <div class="fp-body"></div>
+    <div class="fp-raw-row">
+      <label>Value</label>
+      <input class="fp-raw" spellcheck="false">
+      <span class="fp-hex"></span>
+    </div>
+    <div class="fp-warnings"></div>
+    <div class="fp-actions">
+      <button class="btn fp-apply">Apply</button>
+      ${otherFonts.length > 1 ? `<button class="btn fp-apply-all"></button>` : ''}
+      ${otherFonts.length > 1 && spec.kind === 'bitfield'
+        ? `<button class="btn fp-copy-all" title="Overwrite the whole value in every font">Copy value to all</button>` : ''}
+      <button class="btn fp-reset" title="Back to the value in the original file">Reset</button>
+    </div>
+    <div class="fp-hint">Enter / click outside — apply · Esc — cancel</div>`;
+  const body = pop.querySelector('.fp-body');
+  const raw = pop.querySelector('.fp-raw');
+  const hexEl = pop.querySelector('.fp-hex');
+  const warnEl = pop.querySelector('.fp-warnings');
+  const applyAllBtn = pop.querySelector('.fp-apply-all');
+  if (applyAllBtn) {
+    applyAllBtn.textContent = `Apply to all ${otherFonts.length} fonts`;
+    applyAllBtn.title = spec.kind === 'bitfield'
+      ? 'Sets / clears only the bits you changed; other bits keep each font’s own value'
+      : 'Sets this value in every font';
+  }
+
+  // ─ body: checkboxes / radios ─
+  const renderBody = () => {
+    let html = '';
+    if (spec.kind === 'bitfield') {
+      if (spec.group) {
+        html += `<div class="fp-group-label">${spec.group.label}</div>`;
+        for (const [gv, name] of Object.entries(spec.group.options))
+          html += `<label class="fp-row"><input type="radio" name="fp-group" value="${gv}">
+            <span class="fp-bit">${gv}</span><span class="fp-name">${name}</span></label>`;
+        html += `<div class="fp-group-label">Flags</div>`;
+      }
+      const origVal = parseIntInput(getOriginalDisplayValue(fontIdx, tableName, field)) || 0;
+      for (let bit = 0; bit < 16; bit++) {
+        if (spec.group && (spec.group.mask & (1 << bit))) continue;
+        const named = spec.bits[bit] != null;
+        // Reserved bits are listed only when set, so they can be cleared
+        if (!named && !((val | origVal) & (1 << bit))) continue;
+        const note = !named ? 'reserved'
+          : spec.minVersion && spec.minVersion[bit] ? `OS/2 v${spec.minVersion[bit]}+`
+          : (spec.notes && spec.notes[bit]) || '';
+        html += `<label class="fp-row${named ? '' : ' reserved'}"><input type="checkbox" data-bit="${bit}">
+          <span class="fp-bit">${bit}</span><span class="fp-name">${named ? spec.bits[bit] : 'bit ' + bit}</span>
+          <span class="fp-note">${note}</span></label>`;
+      }
+    } else {
+      for (const [ov, name] of Object.entries(spec.options).sort((a, b) => a[0] - b[0]))
+        html += `<label class="fp-row"><input type="radio" name="fp-enum" value="${ov}">
+          <span class="fp-bit">${ov}</span><span class="fp-name">${name}</span></label>`;
+    }
+    body.innerHTML = html;
+  };
+
+  const getWarnings = () => {
+    const w = [];
+    if (spec.kind === 'bitfield') {
+      if (spec.group && spec.group.options[val & spec.group.mask] == null)
+        w.push(`${spec.group.label}: only one of bits 1–3 may be set`);
+      for (const [a, b] of spec.conflicts || [])
+        if ((val & (1 << a)) && (val & (1 << b)))
+          w.push(`${spec.bits[a]} must not be combined with ${spec.bits[b]}`);
+      for (const [bit, minV] of Object.entries(spec.minVersion || {}))
+        if ((val & (1 << bit)) && os2Version != null && os2Version < minV)
+          w.push(`${spec.bits[bit]} requires OS/2 version ≥ ${minV} (this font: v${os2Version})`);
+      for (let bit = 0; bit < 16; bit++)
+        if ((val & (1 << bit)) && spec.bits[bit] == null && !(spec.group && (spec.group.mask & (1 << bit))))
+          w.push(`Reserved bit ${bit} is set (should be 0)`);
+    } else if (!spec.free && spec.options[val] == null) {
+      w.push(`${val} is not a standard ${field} value`);
+    }
+    return w;
+  };
+
+  // ─ sync UI from val ─
+  let rawError = null;
+  const sync = (fromRaw) => {
+    if (!fromRaw) { raw.value = String(val); rawError = null; }
+    raw.classList.toggle('invalid', !!rawError);
+    hexEl.textContent = rawError ? '' :
+      '0x' + (fDef.type === 'uint32' ? val >>> 0 : val & 0xFFFF).toString(16).toUpperCase()
+        .padStart(fDef.type === 'uint32' ? 8 : 4, '0');
+    if (spec.kind === 'bitfield') {
+      body.querySelectorAll('input[data-bit]').forEach(cb => { cb.checked = !!(val & (1 << +cb.dataset.bit)); });
+      body.querySelectorAll('input[name="fp-group"]').forEach(r => { r.checked = (val & spec.group.mask) === +r.value; });
+    } else {
+      body.querySelectorAll('input[name="fp-enum"]').forEach(r => { r.checked = val === +r.value; });
+    }
+    const warnings = rawError ? [rawError] : getWarnings();
+    warnEl.innerHTML = warnings.map(m => `<div>⚠ ${escHtml(m)}</div>`).join('');
+    warnEl.classList.toggle('error', !!rawError);
+    pop.querySelectorAll('.fp-apply, .fp-apply-all, .fp-copy-all').forEach(b => { b.disabled = !!rawError; });
+  };
+
+  body.addEventListener('change', e => {
+    const t = e.target;
+    if (t.dataset.bit != null) val = t.checked ? (val | (1 << +t.dataset.bit)) : (val & ~(1 << +t.dataset.bit));
+    else if (t.name === 'fp-group') val = (val & ~spec.group.mask) | +t.value;
+    else if (t.name === 'fp-enum') val = +t.value;
+    sync(false);
+  });
+  raw.addEventListener('input', () => {
+    const v = parseIntInput(raw.value);
+    if (isNaN(v)) rawError = 'Not an integer (decimal or 0x-hex)';
+    else if (v < lo || v > hi) rawError = `Out of ${fDef.type} range ${lo}…${hi}`;
+    else if (spec.min != null && (v < spec.min || v > spec.max)) rawError = `Must be within ${spec.min}…${spec.max}`;
+    else { rawError = null; val = v; renderBody(); }
+    sync(true);
+  });
+
+  // ─ apply ─
+  const refresh = () => { closeFieldPopover(false); renderTables(); };
+  const applyHere = () => {
+    if (rawError) return;
+    setFieldValue(fontIdx, tableName, field, formatVal(field, val));
+  };
+  const applyAll = (exact) => {
+    if (rawError) return;
+    // Bits changed in this popover; a touched enum group is replaced as a whole
+    let changed = startVal ^ val;
+    if (spec.group && (changed & spec.group.mask)) changed |= spec.group.mask;
+    for (const i of otherFonts) {
+      let v = val;
+      if (spec.kind === 'bitfield' && !exact) {
+        const cur = getCurrentIntValue(i, tableName, field) ?? 0;
+        v = (cur & ~changed) | (val & changed);
+      }
+      setFieldValue(i, tableName, field, formatVal(field, v));
+    }
+    refresh();
+  };
+  pop.querySelector('.fp-apply').onclick = () => { applyHere(); refresh(); };
+  if (applyAllBtn) applyAllBtn.onclick = () => applyAll(false);
+  const copyAllBtn = pop.querySelector('.fp-copy-all');
+  if (copyAllBtn) copyAllBtn.onclick = () => applyAll(true);
+  pop.querySelector('.fp-reset').onclick = () => {
+    val = parseIntInput(getOriginalDisplayValue(fontIdx, tableName, field)) || 0;
+    renderBody(); sync(false);
+  };
+  pop.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.preventDefault(); closeFieldPopover(false); }
+    else if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
+      e.preventDefault();
+      if (!rawError) { applyHere(); refresh(); }
+    }
+  });
+
+  // ─ placement & lifecycle ─
+  document.body.appendChild(pop);
+  const place = () => {
+    const r = td.getBoundingClientRect();
+    const pw = pop.offsetWidth, ph = pop.offsetHeight;
+    let left = Math.min(r.left, window.innerWidth - pw - 8);
+    let top = r.bottom + 4;
+    if (top + ph > window.innerHeight - 8 && r.top - ph - 4 >= 8) top = r.top - ph - 4;
+    pop.style.left = Math.max(8, left) + 'px';
+    pop.style.top = Math.max(8, top) + 'px';
+  };
+  const onOutside = e => {
+    if (pop.contains(e.target)) return;
+    // Apply on outside click, like the textarea commits on blur
+    const changed = !rawError && val !== getCurrentIntValue(fontIdx, tableName, field);
+    closeFieldPopover(changed);
+  };
+  const onScroll = e => { if (!pop.contains(e.target)) place(); };
+  document.addEventListener('mousedown', onOutside);
+  window.addEventListener('scroll', onScroll, true);
+  window.addEventListener('resize', place);
+
+  activePopover = {
+    apply: () => { applyHere(); renderTables(); },
+    cleanup: () => {
+      document.removeEventListener('mousedown', onOutside);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', place);
+      pop.remove();
+      td.classList.remove('editing');
+    },
+  };
+
+  renderBody();
+  sync(false);
+  place();
+  (body.querySelector('input:checked') || body.querySelector('input') || raw).focus();
 }
 
 function propagateFontRevisionToName(fontIdx, rawRevision) {
@@ -1146,6 +1584,8 @@ function buildCompareTable(title, tableName, getRowData, formatVal, extraFields)
     let label = field;
     if (tableName === 'name' && NAME_IDS[field]) label = `${field} \u2014 ${NAME_IDS[field]}`;
 
+    const readonly = isReadonlyField(tableName, field);
+    const editKind = FIELD_SPECS[tableName + '|' + field] ? ' has-picker' : '';
     html += `<tr class="${emptyClass} ${diffClass}"><td class="param-name">${label}</td>`;
     vals.forEach((v, i) => {
       const key = fonts[i].fileName + '|' + tableName + '|' + field;
@@ -1156,7 +1596,9 @@ function buildCompareTable(title, tableName, getRowData, formatVal, extraFields)
       const cellContent = isDelete
         ? '<span style="color:var(--red);font-style:italic;">\u232b DELETE</span>'
         : formatCell(isEdited ? change.new_value : v);
-      html += `<td class="val${editedClass}" ondblclick="startEdit(this,${i},'${tableName}','${field}')">${cellContent}</td>`;
+      html += readonly
+        ? `<td class="val readonly" title="Read-only field">${cellContent}</td>`
+        : `<td class="val${editedClass}${editKind}" ondblclick="startEdit(this,${i},'${tableName}','${field}')">${cellContent}</td>`;
     });
     html += `</tr>`;
   }
@@ -1324,6 +1766,10 @@ function renderTables() {
     wrap.innerHTML = '<div class="empty-state">Drop font files above to begin</div>';
     return;
   }
+  closeFieldPopover(false);
+  // Keep collapsed sections collapsed across re-renders
+  const collapsed = new Set([...wrap.querySelectorAll('.section-header.collapsed')]
+    .map(h => h.textContent.trim()));
   _truncId.n = 0;
   let html = '';
   html += renderTableDirectory();
@@ -1333,6 +1779,9 @@ function renderTables() {
   html += renderSTAT();
   html += renderAvar();
   wrap.innerHTML = html;
+  wrap.querySelectorAll('.section-header').forEach(h => {
+    if (collapsed.has(h.textContent.trim())) toggleSection(h);
+  });
 }
 
 // ══════════════════════════════════════════════════════════
