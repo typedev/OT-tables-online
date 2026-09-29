@@ -254,6 +254,21 @@ table.compare tbody td.val .cell-error:empty { display: none; }
 .field-popover .fp-warnings { padding: 0 12px; font-size: 11px; color: var(--accent); }
 .field-popover .fp-warnings:not(:empty) { padding-bottom: 8px; }
 .field-popover .fp-warnings.error { color: var(--red); }
+.field-popover .fp-warnings > div + div { margin-top: 2px; }
+.field-popover .fp-fix {
+  font-family: var(--font-mono); font-size: 10px; padding: 0 6px; margin-left: 4px;
+  background: none; color: var(--accent); border: 1px solid var(--accent-dim);
+  border-radius: 3px; cursor: pointer;
+}
+.field-popover .fp-fix:hover { background: rgba(232,164,74,0.12); }
+.field-popover .fp-all-issues { color: var(--text-dim); margin-top: 6px; }
+.field-popover .fp-link {
+  display: flex; align-items: center; gap: 6px; padding: 0 12px 8px;
+  font-size: 11px; color: var(--text-label); cursor: pointer;
+}
+.field-popover .fp-link[hidden] { display: none; }
+.field-popover .fp-link input { accent-color: var(--blue); margin: 0; }
+table.compare tbody td.val .cell-warn { color: var(--accent); cursor: help; }
 .field-popover .fp-actions {
   display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border);
 }
@@ -356,24 +371,53 @@ const FONT_DIRECTION_NAMES = {'-2':'Right-to-left + neutrals','-1':'Right-to-lef
 //   bitfield: bits {bit: name}, notes {bit: hint}, minVersion {bit: OS/2 version},
 //             conflicts [[a, b], ...] (bits that must not be set together),
 //             group {mask, label, options} (bits under mask form one enum value)
-//   enum:     options {value: name}, min/max (valid range), free (any value in range is fine)
+//   enum:     options {value: name}, min/max (valid range), free (any value in range is fine),
+//             recommended {value, reason}
+//   link:     {table, field, label, mismatch(val, other) -> [names], derive(val, other) -> other}
+//             a field in another table that must agree with this one
 const FIELD_SPECS = {
   'OS/2|fsSelection': {
     kind: 'bitfield', bits: FSSELECTION_BITS,
     notes: {1:'legacy', 2:'legacy', 3:'legacy', 4:'legacy', 6:'exclusive with ITALIC / BOLD'},
     minVersion: {7:4, 8:4, 9:4},
     conflicts: [[6, 0], [6, 5]],
+    link: { table: 'head', field: 'macStyle', label: 'Bold / Italic',
+            mismatch: (v, o) => styleMismatches(v, o), derive: macStyleFromFsSelection },
   },
   'OS/2|fsType': {
     kind: 'bitfield', bits: FSTYPE_BITS,
     group: {mask: 0x000F, label: 'Usage permissions', options: FSTYPE_USAGE},
   },
   'head|flags':    { kind: 'bitfield', bits: HEAD_FLAGS_BITS },
-  'head|macStyle': { kind: 'bitfield', bits: MACSTYLE_BITS },
+  'head|macStyle': {
+    kind: 'bitfield', bits: MACSTYLE_BITS,
+    link: { table: 'OS/2', field: 'fsSelection', label: 'ITALIC / BOLD / REGULAR',
+            mismatch: (v, o) => styleMismatches(o, v), derive: fsSelectionFromMacStyle },
+  },
   'OS/2|usWidthClass':  { kind: 'enum', options: WIDTH_NAMES, min: 1, max: 9 },
   'OS/2|usWeightClass': { kind: 'enum', options: WEIGHT_NAMES, min: 1, max: 1000, free: true },
-  'head|fontDirectionHint': { kind: 'enum', options: FONT_DIRECTION_NAMES, min: -2, max: 2 },
+  'head|fontDirectionHint': { kind: 'enum', options: FONT_DIRECTION_NAMES, min: -2, max: 2,
+                              recommended: { value: 2, reason: 'deprecated field, spec says set it to 2' } },
 };
+
+// fsSelection ITALIC / BOLD must agree with head.macStyle Italic / Bold
+const STYLE_LINKS = [{name: 'Italic', fs: 0, mac: 1}, {name: 'Bold', fs: 5, mac: 0}];
+function styleMismatches(fsSel, macStyle) {
+  return STYLE_LINKS.filter(l => !!(fsSel & (1 << l.fs)) !== !!(macStyle & (1 << l.mac))).map(l => l.name);
+}
+function macStyleFromFsSelection(fsSel, macStyle) {
+  for (const l of STYLE_LINKS)
+    macStyle = (fsSel & (1 << l.fs)) ? macStyle | (1 << l.mac) : macStyle & ~(1 << l.mac);
+  return macStyle;
+}
+function fsSelectionFromMacStyle(macStyle, fsSel) {
+  let v = fsSel;
+  for (const l of STYLE_LINKS)
+    v = (macStyle & (1 << l.mac)) ? v | (1 << l.fs) : v & ~(1 << l.fs);
+  if (v === fsSel) return fsSel;
+  // ITALIC / BOLD changed: REGULAR is set exactly when neither of them is
+  return (v & 0x21) ? v & ~0x40 : v | 0x40;
+}
 
 // ── Binary layout descriptors (for serialization) ──
 const HEAD_LAYOUT = [
@@ -1136,13 +1180,51 @@ function fieldExists(fontIdx, tableName, field) {
   return !!t && t[field] != null;
 }
 
+// Spec problems of a field value in a given font: [{msg, fix?: {label, apply(v) -> v}}].
+// opts.skipLink: don't compare with the linked field (it is about to be synced).
+function getFieldWarnings(fontIdx, tableName, field, val, opts = {}) {
+  const spec = FIELD_SPECS[tableName + '|' + field];
+  const w = [];
+  if (!spec || val == null || isNaN(val)) return w;
+  const f = fonts[fontIdx];
+  const os2Version = f.os2Table ? f.os2Table.version : null;
+  const clearBit = bit => ({ label: 'Clear', apply: v => v & ~(1 << bit) });
+  if (spec.kind === 'bitfield') {
+    if (spec.group && spec.group.options[val & spec.group.mask] == null)
+      w.push({ msg: `${spec.group.label}: only one of bits 1\u20133 may be set` });
+    for (const [a, b] of spec.conflicts || [])
+      if ((val & (1 << a)) && (val & (1 << b)))
+        w.push({ msg: `${spec.bits[a]} must not be combined with ${spec.bits[b]}`,
+                 fix: { label: `Clear ${spec.bits[a]}`, apply: v => v & ~(1 << a) } });
+    for (const [bit, minV] of Object.entries(spec.minVersion || {}))
+      if ((val & (1 << bit)) && os2Version != null && os2Version < minV)
+        w.push({ msg: `${spec.bits[bit]} requires OS/2 version \u2265 ${minV} (font has v${os2Version})`,
+                 fix: clearBit(+bit) });
+    for (let bit = 0; bit < 16; bit++)
+      if ((val & (1 << bit)) && spec.bits[bit] == null && !(spec.group && (spec.group.mask & (1 << bit))))
+        w.push({ msg: `Reserved bit ${bit} is set (should be 0)`, fix: clearBit(bit) });
+  } else {
+    if (!spec.free && spec.options[val] == null)
+      w.push({ msg: `${val} is not a standard ${field} value` });
+    if (spec.recommended && val !== spec.recommended.value)
+      w.push({ msg: `Should be ${spec.recommended.value}: ${spec.recommended.reason}`,
+               fix: { label: `Set ${spec.recommended.value}`, apply: () => spec.recommended.value } });
+  }
+  if (spec.link && !opts.skipLink && fieldExists(fontIdx, spec.link.table, spec.link.field)) {
+    const other = getCurrentIntValue(fontIdx, spec.link.table, spec.link.field);
+    const diff = other == null ? [] : spec.link.mismatch(val, other);
+    if (diff.length)
+      w.push({ msg: `${diff.join(' / ')} differ${diff.length === 1 ? 's' : ''} from ${spec.link.table}.${spec.link.field}` });
+  }
+  return w;
+}
+
 function openFieldPopover(td, fontIdx, tableName, field, spec) {
   closeFieldPopover(false);
   const f = fonts[fontIdx];
   const fDef = findFieldDef(tableName, field);
   const [lo, hi] = INT_RANGES[fDef.type];
   const formatVal = tableName === 'head' ? formatHeadValue : formatOS2Value;
-  const os2Version = f.os2Table ? f.os2Table.version : null;
   const startVal = getCurrentIntValue(fontIdx, tableName, field) ?? 0;
   let val = startVal;
   const otherFonts = fonts.map((_, i) => i).filter(i => fieldExists(i, tableName, field));
@@ -1162,6 +1244,7 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
       <span class="fp-hex"></span>
     </div>
     <div class="fp-warnings"></div>
+    <label class="fp-link" hidden><input type="checkbox" class="fp-link-cb"> <span></span></label>
     <div class="fp-actions">
       <button class="btn fp-apply">Apply</button>
       ${otherFonts.length > 1 ? `<button class="btn fp-apply-all"></button>` : ''}
@@ -1175,6 +1258,19 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
   const hexEl = pop.querySelector('.fp-hex');
   const warnEl = pop.querySelector('.fp-warnings');
   const applyAllBtn = pop.querySelector('.fp-apply-all');
+  const link = spec.link;
+  const linkFmt = link && (link.table === 'head' ? formatHeadValue : formatOS2Value);
+  const linkRow = pop.querySelector('.fp-link');
+  const linkCb = pop.querySelector('.fp-link-cb');
+  if (link && otherFonts.some(i => fieldExists(i, link.table, link.field))) {
+    linkRow.hidden = false;
+    linkRow.querySelector('span').textContent = `Keep ${link.table}.${link.field} ${link.label} in sync`;
+    // On by default when this font is consistent now, so applying keeps it that way
+    const other = fieldExists(fontIdx, link.table, link.field)
+      ? getCurrentIntValue(fontIdx, link.table, link.field) : null;
+    linkCb.checked = other == null || link.mismatch(startVal, other).length === 0;
+  }
+  const syncLink = () => !!link && !linkRow.hidden && linkCb.checked;
   if (applyAllBtn) {
     applyAllBtn.textContent = `Apply to all ${otherFonts.length} fonts`;
     applyAllBtn.title = spec.kind === 'bitfield'
@@ -1214,28 +1310,19 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
     body.innerHTML = html;
   };
 
-  const getWarnings = () => {
-    const w = [];
-    if (spec.kind === 'bitfield') {
-      if (spec.group && spec.group.options[val & spec.group.mask] == null)
-        w.push(`${spec.group.label}: only one of bits 1–3 may be set`);
-      for (const [a, b] of spec.conflicts || [])
-        if ((val & (1 << a)) && (val & (1 << b)))
-          w.push(`${spec.bits[a]} must not be combined with ${spec.bits[b]}`);
-      for (const [bit, minV] of Object.entries(spec.minVersion || {}))
-        if ((val & (1 << bit)) && os2Version != null && os2Version < minV)
-          w.push(`${spec.bits[bit]} requires OS/2 version ≥ ${minV} (this font: v${os2Version})`);
-      for (let bit = 0; bit < 16; bit++)
-        if ((val & (1 << bit)) && spec.bits[bit] == null && !(spec.group && (spec.group.mask & (1 << bit))))
-          w.push(`Reserved bit ${bit} is set (should be 0)`);
-    } else if (!spec.free && spec.options[val] == null) {
-      w.push(`${val} is not a standard ${field} value`);
-    }
-    return w;
+  // Bits changed in this popover; a touched enum group is replaced as a whole.
+  // For "Apply to all" only those bits are merged into each font's own value.
+  const mergedValue = (i, exact) => {
+    if (i === fontIdx || exact || spec.kind !== 'bitfield') return val;
+    let changed = startVal ^ val;
+    if (spec.group && (changed & spec.group.mask)) changed |= spec.group.mask;
+    const cur = getCurrentIntValue(i, tableName, field) ?? 0;
+    return (cur & ~changed) | (val & changed);
   };
 
   // ─ sync UI from val ─
   let rawError = null;
+  let shownWarnings = [];
   const sync = (fromRaw) => {
     if (!fromRaw) { raw.value = String(val); rawError = null; }
     raw.classList.toggle('invalid', !!rawError);
@@ -1248,8 +1335,24 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
     } else {
       body.querySelectorAll('input[name="fp-enum"]').forEach(r => { r.checked = val === +r.value; });
     }
-    const warnings = rawError ? [rawError] : getWarnings();
-    warnEl.innerHTML = warnings.map(m => `<div>⚠ ${escHtml(m)}</div>`).join('');
+    shownWarnings = rawError ? [{ msg: rawError }]
+      : getFieldWarnings(fontIdx, tableName, field, val, { skipLink: syncLink() });
+    let html = shownWarnings.map((w, k) => `<div>\u26a0 ${escHtml(w.msg)}${w.fix
+      ? ` <button class="fp-fix" data-k="${k}">${escHtml(w.fix.label)}</button>` : ''}</div>`).join('');
+    // What "Apply to all" would leave broken in the other fonts
+    if (!rawError && spec.kind === 'bitfield' && otherFonts.length > 1) {
+      const issues = [];
+      for (const i of otherFonts) {
+        if (i === fontIdx) continue;
+        for (const w of getFieldWarnings(i, tableName, field, mergedValue(i, false), { skipLink: syncLink() }))
+          issues.push(`${fonts[i].fileName}: ${w.msg}`);
+      }
+      if (issues.length)
+        html += `<div class="fp-all-issues">After \u201cApply to all\u201d:${issues.slice(0, 4)
+          .map(m => `<div>\u2022 ${escHtml(m)}</div>`).join('')}${issues.length > 4
+          ? `<div>\u2026 and ${issues.length - 4} more</div>` : ''}</div>`;
+    }
+    warnEl.innerHTML = html;
     warnEl.classList.toggle('error', !!rawError);
     pop.querySelectorAll('.fp-apply, .fp-apply-all, .fp-copy-all').forEach(b => { b.disabled = !!rawError; });
   };
@@ -1261,6 +1364,13 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
     else if (t.name === 'fp-enum') val = +t.value;
     sync(false);
   });
+  warnEl.addEventListener('click', e => {
+    const k = e.target.dataset && e.target.dataset.k;
+    if (k == null || !shownWarnings[k] || !shownWarnings[k].fix) return;
+    val = shownWarnings[k].fix.apply(val);
+    renderBody(); sync(false);
+  });
+  linkCb.addEventListener('change', () => sync(true));
   raw.addEventListener('input', () => {
     const v = parseIntInput(raw.value);
     if (isNaN(v)) rawError = 'Not an integer (decimal or 0x-hex)';
@@ -1272,23 +1382,17 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
 
   // ─ apply ─
   const refresh = () => { closeFieldPopover(false); renderTables(); };
-  const applyHere = () => {
-    if (rawError) return;
-    setFieldValue(fontIdx, tableName, field, formatVal(field, val));
+  const applyTo = (i, v) => {
+    setFieldValue(i, tableName, field, formatVal(field, v));
+    if (syncLink() && fieldExists(i, link.table, link.field)) {
+      const other = getCurrentIntValue(i, link.table, link.field) ?? 0;
+      setFieldValue(i, link.table, link.field, linkFmt(link.field, link.derive(v, other)));
+    }
   };
+  const applyHere = () => { if (!rawError) applyTo(fontIdx, val); };
   const applyAll = (exact) => {
     if (rawError) return;
-    // Bits changed in this popover; a touched enum group is replaced as a whole
-    let changed = startVal ^ val;
-    if (spec.group && (changed & spec.group.mask)) changed |= spec.group.mask;
-    for (const i of otherFonts) {
-      let v = val;
-      if (spec.kind === 'bitfield' && !exact) {
-        const cur = getCurrentIntValue(i, tableName, field) ?? 0;
-        v = (cur & ~changed) | (val & changed);
-      }
-      setFieldValue(i, tableName, field, formatVal(field, v));
-    }
+    for (const i of otherFonts) applyTo(i, mergedValue(i, exact));
     refresh();
   };
   pop.querySelector('.fp-apply').onclick = () => { applyHere(); refresh(); };
@@ -1321,7 +1425,8 @@ function openFieldPopover(td, fontIdx, tableName, field, spec) {
   const onOutside = e => {
     if (pop.contains(e.target)) return;
     // Apply on outside click, like the textarea commits on blur
-    const changed = !rawError && val !== getCurrentIntValue(fontIdx, tableName, field);
+    const changed = !rawError && (val !== getCurrentIntValue(fontIdx, tableName, field)
+      || (syncLink() && val !== startVal));
     closeFieldPopover(changed);
   };
   const onScroll = e => { if (!pop.contains(e.target)) place(); };
@@ -1430,7 +1535,7 @@ function exportChanges() {
 
 function escHtml(s) {
   if (!s && s !== 0) return '<span style="color:var(--text-dim)">\u2014</span>';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 const _truncId = { n: 0 };
@@ -1593,9 +1698,14 @@ function buildCompareTable(title, tableName, getRowData, formatVal, extraFields)
       const isEdited = !!change;
       const isDelete = change && change.action === 'delete';
       const editedClass = isEdited ? (isDelete ? ' edited marked-delete' : ' edited') : '';
-      const cellContent = isDelete
+      let cellContent = isDelete
         ? '<span style="color:var(--red);font-style:italic;">\u232b DELETE</span>'
         : formatCell(isEdited ? change.new_value : v);
+      if (editKind && !isDelete) {
+        const warns = getFieldWarnings(i, tableName, field, parseIntInput(isEdited ? change.new_value : v));
+        if (warns.length)
+          cellContent += ` <span class="cell-warn" title="${escHtml(warns.map(w => w.msg).join('\n'))}">\u26a0</span>`;
+      }
       html += readonly
         ? `<td class="val readonly" title="Read-only field">${cellContent}</td>`
         : `<td class="val${editedClass}${editKind}" ondblclick="startEdit(this,${i},'${tableName}','${field}')">${cellContent}</td>`;
